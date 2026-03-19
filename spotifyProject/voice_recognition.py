@@ -4,11 +4,12 @@ import speech_recognition as sr
 import threading
 import spotipy
 from spotify_auth import add_song_to_playlist
-
 import sounddevice as sd
 import numpy as np
 import scipy.io.wavfile as wav
 import tempfile, os
+import asyncio
+from shazamio import Shazam
 
 class voiceRecognitionTool:
     def __init__(self, root, sp: spotipy.Spotify):
@@ -64,11 +65,56 @@ class voiceRecognitionTool:
         self.root.after(0, lambda: self.status_var.set(msg))   
 
     def show_result(self, text):
-        self.result_box.config(state="normal")
-        self.result_box.delete("1.0", "end")
-        self.result_box.insert("end", text)
-        self.result_box.config(state="disabled")
+        def update():
+            self.result_box.config(state="normal")
+            self.result_box.delete("1.0", "end")
+            self.result_box.insert("end", text)
+            self.result_box.config(state="disabled")
+        self.root.after(0, update)
 
+    # Google -> Shazam processor
+    def _process_audio(self, wav_path):
+        self.set_status("Trying Google Music Recognition (5 seconds)...")
+
+        try:
+            with sr.AudioFile(wav_path) as source:
+                audio_data = self.recognizer.record(source)
+            text = self.recognizer.recognize_google(audio_data)
+            self.set_status(f"✅ Google recognized: '{text}'")
+            self._search_spotify(text)
+            return
+        except Exception as e:
+            self.set_status(f"Google failed ({type(e).__name__}). Trying Shazam.")
+
+        # Trying Shazam
+        self.set_status("Trying Shazam Music Recognition.")
+        try:
+            song_info = asyncio.run(self._recognize_with_shazam(wav_path))
+            if song_info:
+                self.set_status(f"✅ Shazam found: {song_info}")
+                self._search_spotify(song_info)
+            else:
+                self.set_status("Neither Google nor Shazam could identify the song.\nTry clearer/louder audio.")
+        except Exception as e:
+            self.set_status(f"Shazam error: {str(e)}")
+        finally:
+            if os.path.exists(wav_path):
+                os.unlink(wav_path)      
+
+    async def _recognize_with_shazam(self, audio_path: str):
+        """Real Shazam fingerprinting (async)."""
+        shazam = Shazam()
+        result = await shazam.recognize_song(audio_path)
+        
+        if result and "track" in result:
+            track = result["track"]
+            title = track.get("title", "")
+            artist = track.get("subtitle", "")
+            if not artist and track.get("artists"):
+                artist = track["artists"][0].get("name", "")
+            return f"{title} by {artist}" if title else None
+        return None
+    
     # microphone listening
     def listen_mic(self):
         threading.Thread(target=self._mic_worker, daemon=True).start()
@@ -81,16 +127,19 @@ class voiceRecognitionTool:
                 self.recognizer.adjust_for_ambient_noise(source, duration=1)
                 audio = self.recognizer.listen(source, timeout=10, phrase_time_limit=15)
             
-            self.set_status("🔍 Recognizing...")
-            text = self.recognizer.recognize_google(audio)
-            self.set_status(f"You said: '{text}'")
-            self._search_spotify(text)
+            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp.close()
+            with open(tmp.name, "wb") as f:
+                f.write(audio.get_wav_data())
+
+            self._process_audio(tmp.name)
+
         except sr.WaitTimeoutError:
             self.set_status("⏰ Timed out. Try again.")
         except sr.UnknownValueError:
             self.set_status("❓ Couldn't understand audio. Try again.")
         except Exception as e:
-            self.set_status(f"Error: {e}")
+            self.set_status(f"Mic Error: {e}")
 
     # system audio capture
     def listen_system(self):
@@ -98,6 +147,7 @@ class voiceRecognitionTool:
 
     def _system_audio_worker(self):
         try:
+            self.set_status("Recording system audio 🎤...")
             sample_rate = 44100
             duration = 8 # seconds
 
@@ -110,18 +160,11 @@ class voiceRecognitionTool:
 
             # saves it as a temp .wav file in order to search it
             tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp.close()
             wav.write(tmp.name, sample_rate, recording)
 
-            # recognising...
-            self.set_status("🔍 Analyzing audio...")
-            with sr.AudioFile(tmp.name) as source:
-                audio = self.recognizer.record(source)
+            self._process_audio(tmp.name)
 
-            os.unlink(tmp.name) # clean up temp file
-
-            text = self.recognizer.recognize_google(audio)
-            self.set_status(f"Detected: '{text}'")
-            self._search_spotify(text)
         except Exception as e:
             self.set_status(f"System audio error: {e}\n"
                             "Perhaps: Enable 'Stereo Mix' in Windows sound settings.")
