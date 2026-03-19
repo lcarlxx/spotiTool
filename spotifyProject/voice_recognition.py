@@ -74,6 +74,7 @@ class voiceRecognitionTool:
         threading.Thread(target=self._mic_worker, daemon=True).start()
     
     def _mic_worker(self):
+        # print(sr.Microphone.list_microphone_names())  # run once to see your devices
         self.set_status("🎙️ Listening... Sing or play a song!")
         try:
             with sr.Microphone() as source:
@@ -126,28 +127,33 @@ class voiceRecognitionTool:
                             "Perhaps: Enable 'Stereo Mix' in Windows sound settings.")
             
     def _search_spotify(self, query: str):
-        self.set_status(f"🔎 Searching Spotify for: '{query}'")
-        results = self.sp.search(q=query, type="track", limit=1)
-        tracks = results.get("tracks", {}).get("items", [])
+        def do_search():
+            self.set_status(f"🔎 Searching Spotify for: '{query}'")
+            try:
+                results = self.sp.search(q=query, type="track", limit=1)
+                tracks = results.get("tracks", {}).get("items", [])
 
-        if not tracks:
-            self.set_status("❌ No matching song found on Spotify.")
-            return
-        
-        track = tracks[0]
-        name = track["name"]
-        artist = track["artists"][0]["name"]
-        uri = track["uri"]
+                if not tracks:
+                    self.set_status("❌ No matching song found on Spotify.")
+                    return
 
-        self.self.show_result(f"🎵 Found: {name} by {artist}")
-        self.set_status("Song Found!")
+                track = tracks[0]
+                name = track["name"]
+                artist = track["artists"][0]["name"]
+                uri = track["uri"]
 
-        # ask user if they should add it to ProjectSongs
-        self.root.after(0, lambda: self._ask_to_save(name, artist, uri))
-    
+                self.show_result(f"🎵 Found: {name} by {artist}")
+                self.set_status("Song Found!")
+                # ask user if they should add it to ProjectSongs
+                self.root.after(0, lambda: self._ask_to_save(name, artist, uri))
+            except Exception as e:
+                self.set_status(f"Spotify error: {e}")
+        self.root.after(0, do_search)    
+
     def _ask_to_save(self, name, artist, uri):
         answer = messagebox.askyesno("Add to Playlist?",
                                      f"Found: {name} by {artist}\n\nAdd this to your 'ProjectSongs' playlist?")
+        
         if answer:
             add_song_to_playlist(self.sp, uri)
-            messagebox("Added! ✅", f"'{name}' added to ProjectSongs!")
+            messagebox.showinfo("Added! ✅", f"'{name}' added to ProjectSongs!")
