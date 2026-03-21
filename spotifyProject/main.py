@@ -59,7 +59,7 @@ class LoginScreen:
         
         success, message = login_user(username, password)
         if success:
-            self.open_homepage(username)
+            self.verify_spotify_account(username)
         else:
             self.status_label.config(text=message)
     
@@ -76,16 +76,41 @@ class LoginScreen:
             if success:
                 messagebox.showinfo("Account Created Successfully!",
                                     "Account Created! Now link your Spotify Account.")
-                self.link_spotify(username)
+                self.verify_spotify_account(username)
             else:
                 self.status_label.config(text=message)
         except Exception as e:
             messagebox.showerror("Registration Error", f"Something went wrong:\n\n{e}")
 
 
-    def link_spotify(self, username):
+    def verify_spotify_account(self, username):
+        """After login or register, confirm the cached Spotify account is correct."""
         try:
-            sp = get_spotify_client()
+            sp = get_spotify_client()  # uses cached token if available
+            sp_user = sp.current_user()
+            display_name = sp_user.get("display_name") or sp_user["id"]
+
+            answer = messagebox.askyesno(
+                "Confirm Spotify Account",
+                f"The linked Spotify account is:\n\n🎵 {display_name}\n\nIs this correct?"
+            )
+            if answer:
+                # save/update the spotify_id in case it changed
+                users = load_users()
+                users[username]["spotify_id"] = sp_user["id"]
+                save_users(users)
+                self.open_homepage(username)
+            else:
+                # user wants a different account — force re-authentication
+                self.link_spotify(username, force_reauth=True)
+        except Exception as e:
+            messagebox.showerror("Spotify Error", f"Could not reach Spotify:\n{e}")
+            # fall back to fresh link
+            self.link_spotify(username, force_reauth=True)
+
+    def link_spotify(self, username, force_reauth=False):
+        try:
+            sp = get_spotify_client(force_reauth=force_reauth)
             sp_user = sp.current_user()
             # save spotify username to our JSON
             users = load_users()
@@ -115,4 +140,4 @@ if __name__ == "__main__":
         if res:
             root.mainloop()
         else:
-            root.destroy()                       
+            root.destroy()

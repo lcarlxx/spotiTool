@@ -5,7 +5,6 @@ import threading
 import spotipy
 from spotify_auth import add_song_to_playlist
 import sounddevice as sd
-import numpy as np
 import scipy.io.wavfile as wav
 import tempfile, os
 import asyncio
@@ -72,39 +71,34 @@ class voiceRecognitionTool:
             self.result_box.config(state="disabled")
         self.root.after(0, update)
 
-    # Google -> Shazam processor
+    # Shazam-only processor
     def _process_audio(self, wav_path):
-        self.set_status("Trying Google Music Recognition (5 seconds)...")
-
+        self.set_status("🎵 Identifying with Shazam...")
         try:
-            with sr.AudioFile(wav_path) as source:
-                audio_data = self.recognizer.record(source)
-            text = self.recognizer.recognize_google(audio_data)
-            self.set_status(f"✅ Google recognized: '{text}'")
-            self._search_spotify(text)
-            return
-        except Exception as e:
-            self.set_status(f"Google failed ({type(e).__name__}). Trying Shazam.")
+            # Create a fresh event loop for this background thread to avoid
+            # "This event loop is already running" errors on Windows/macOS
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                song_info = loop.run_until_complete(self._recognize_with_shazam(wav_path))
+            finally:
+                loop.close()
 
-        # Trying Shazam
-        self.set_status("Trying Shazam Music Recognition.")
-        try:
-            song_info = asyncio.run(self._recognize_with_shazam(wav_path))
             if song_info:
                 self.set_status(f"✅ Shazam found: {song_info}")
                 self._search_spotify(song_info)
             else:
-                self.set_status("Neither Google nor Shazam could identify the song.\nTry clearer/louder audio.")
+                self.set_status("❌ Shazam couldn't identify the song.\nTry clearer/louder audio.")
         except Exception as e:
             self.set_status(f"Shazam error: {str(e)}")
         finally:
             if os.path.exists(wav_path):
-                os.unlink(wav_path)      
+                os.unlink(wav_path)
 
     async def _recognize_with_shazam(self, audio_path: str):
         """Real Shazam fingerprinting (async)."""
         shazam = Shazam()
-        result = await shazam.recognize_song(audio_path)
+        result = await shazam.recognize(audio_path) # result = await shazam.recognize_song(audio_path) did not work
         
         if result and "track" in result:
             track = result["track"]
@@ -121,23 +115,23 @@ class voiceRecognitionTool:
     
     def _mic_worker(self):
         # print(sr.Microphone.list_microphone_names())  # run once to see your devices
-        self.set_status("🎙️ Listening... Sing or play a song!")
+        self.set_status("🎙️ Recording via microphone (8 seconds)...\nPlay the song near your mic!")
         try:
-            with sr.Microphone() as source:
-                self.recognizer.adjust_for_ambient_noise(source, duration=1)
-                audio = self.recognizer.listen(source, timeout=10, phrase_time_limit=15)
-            
+            sample_rate = 44100
+            duration = 10
+
+            recording = sd.rec(int(duration * sample_rate),
+                            samplerate=sample_rate,
+                            channels=1,
+                            dtype='int16')
+            sd.wait()
+
             tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             tmp.close()
-            with open(tmp.name, "wb") as f:
-                f.write(audio.get_wav_data())
+            wav.write(tmp.name, sample_rate, recording)
 
             self._process_audio(tmp.name)
 
-        except sr.WaitTimeoutError:
-            self.set_status("⏰ Timed out. Try again.")
-        except sr.UnknownValueError:
-            self.set_status("❓ Couldn't understand audio. Try again.")
         except Exception as e:
             self.set_status(f"Mic Error: {e}")
 
@@ -149,12 +143,12 @@ class voiceRecognitionTool:
         try:
             self.set_status("Recording system audio 🎤...")
             sample_rate = 44100
-            duration = 8 # seconds
+            duration = 10 # seconds
 
             # record audio from default input
             recording = sd.rec(int(duration * sample_rate),
                                samplerate=sample_rate,
-                               channels=2,
+                               channels=1,
                                dtype='int16')
             sd.wait() # waits until recording is finished
 
@@ -170,33 +164,38 @@ class voiceRecognitionTool:
                             "Perhaps: Enable 'Stereo Mix' in Windows sound settings.")
             
     def _search_spotify(self, query: str):
-        def do_search():
-            self.set_status(f"🔎 Searching Spotify for: '{query}'")
-            try:
-                results = self.sp.search(q=query, type="track", limit=1)
-                tracks = results.get("tracks", {}).get("items", [])
+        # This is called from a background thread — schedule onto the main thread
+        self.root.after(0, lambda: self._do_search(query))
 
-                if not tracks:
-                    self.set_status("❌ No matching song found on Spotify.")
-                    return
+    def _do_search(self, query: str):
+        """Runs on the main thread."""
+        self.set_status(f"🔎 Searching Spotify for: '{query}'")
+        try:
+            results = self.sp.search(q=query, type="track", limit=1)
+            tracks = results.get("tracks", {}).get("items", [])
 
-                track = tracks[0]
-                name = track["name"]
-                artist = track["artists"][0]["name"]
-                uri = track["uri"]
+            if not tracks:
+                self.set_status("❌ No matching song found on Spotify.")
+                return
 
-                self.show_result(f"🎵 Found: {name} by {artist}")
-                self.set_status("Song Found!")
-                # ask user if they should add it to ProjectSongs
-                self.root.after(0, lambda: self._ask_to_save(name, artist, uri))
-            except Exception as e:
-                self.set_status(f"Spotify error: {e}")
-        self.root.after(0, do_search)    
+            track = tracks[0]
+            name = track["name"]
+            artist = track["artists"][0]["name"]
+            uri = track["uri"]
+
+            self.show_result(f"🎵 Found: {name} by {artist}")
+            self.set_status("✅ Song Found!")
+            self._ask_to_save(name, artist, uri)
+        except Exception as e:
+            self.set_status(f"Spotify error: {e}")
 
     def _ask_to_save(self, name, artist, uri):
         answer = messagebox.askyesno("Add to Playlist?",
                                      f"Found: {name} by {artist}\n\nAdd this to your 'ProjectSongs' playlist?")
         
         if answer:
-            add_song_to_playlist(self.sp, uri)
-            messagebox.showinfo("Added! ✅", f"'{name}' added to ProjectSongs!")
+            try:
+                add_song_to_playlist(self.sp, uri)
+                messagebox.showinfo("Added! ✅", f"'{name}' added to ProjectSongs!")
+            except Exception as e:
+                messagebox.showerror("Error ❌", f"Failed to add song:\n{e}")
