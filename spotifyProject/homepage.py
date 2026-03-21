@@ -73,7 +73,7 @@ class HomePage:
                   font=("Helvetica", 14, "bold"),
                   bg="#0f3460", fg="white",
                   width=30, height=3,
-                  command=lambda: self.launch_voice(tools_win)).pack(pady=10)
+                  command=lambda: self.launch_stats(tools_win)).pack(pady=10)
         
     def launch_voice(self, parent):
         from voice_recognition import voiceRecognitionTool
