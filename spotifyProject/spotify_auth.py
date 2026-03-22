@@ -6,6 +6,7 @@ import json
 CLIENT_ID = "73c6db4721b74bfb9a4588c6514ef868"
 CLIENT_SECRET = "56d668bb771f4c6ba9ea2cda445e053a"
 REDIRECT_URI = "http://127.0.0.1:8888/callback"
+PROJECT_SONGS_PLAYLIST_ID = "0ZyG7KYBa5cT8oJua0V4jJ"
 
 # our permissions
 SCOPE = (
@@ -60,8 +61,8 @@ def get_or_create_playlist(sp, playlist_name="ProjectSongs"):
 
     # however if it's not found, lets create it
     new_playlist = sp.user_playlist_create(
-        user=user_id,
-        name=playlist_name,
+        user_id,
+        playlist_name,
         public=False,
         description="Songs found using Python Project voice recognition!"
     )
@@ -69,5 +70,5 @@ def get_or_create_playlist(sp, playlist_name="ProjectSongs"):
 
 def add_song_to_playlist(sp: spotipy.Spotify, track_uri):
     playlist_id = get_or_create_playlist(sp)
-    result = sp.playlist_add_items(playlist_id, [track_uri])
+    result = sp.playlist_add_items(PROJECT_SONGS_PLAYLIST_ID, [track_uri])
     print("Added track:", result)
