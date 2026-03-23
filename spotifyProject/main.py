@@ -15,8 +15,8 @@ class LoginScreen:
 
     def build_ui(self):
         # Title
-        tk.Label(self.root, text="🎵 Python Project",
-                 font=("Helvetica", 22, "bold"),
+        tk.Label(self.root, text="🎵 SpotiTool",
+                 font=("Helvetica", 26, "bold"),
                  bg="#1a1a2e", fg="#1DB954").pack(pady=30)
         
         # Username Field
@@ -64,7 +64,7 @@ class LoginScreen:
             self.status_label.config(text=message)
     
     def handle_register(self):
-        username = self.username_entry.get().strip()
+        username = self.username_entry.get().strip().lower()
         password = self.password_entry.get().strip()
 
         if not username or not password:
@@ -133,6 +133,7 @@ class LoginScreen:
 if __name__ == "__main__":
     root = tk.Tk()
     LoginScreen(root)
+    # added this exception because ts pisses me off
     try:
         root.mainloop()
     except KeyboardInterrupt:
