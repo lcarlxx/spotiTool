@@ -20,7 +20,7 @@ class HomePage:
         header = tk.Frame(self.root, bg="#16213e", pady=15)
         header.pack(fill="x")
 
-        tk.Label(header, text="🎵 Python Project", font=("Helvetica", 24, "bold"),
+        tk.Label(header, text="🎵 SpotiTool", font=("Helvetica", 24, "bold"),
                  bg="#1a1a2e", fg="#1DB954").pack(side="left", padx=20)
         
         tk.Button(header, text="About", font=("Helvetica", 11),
@@ -41,7 +41,7 @@ class HomePage:
         
     def show_about(self):
         messagebox.showinfo("About",
-                            "This Python Project is a Spotify companion app.\n\n"
+                            "This is SpotiTool a Spotify companion app.\n\n"
                             "• Identify songs using your microphone or system audio\n"
                             "• View your Spotify listening stats\n"
                             "• Auto-save discovered songs to a playlist\n\n"
@@ -49,7 +49,7 @@ class HomePage:
                         )
     
     def open_tools(self):
-        tools_win = tk.Toplevel(self.root)
+        tools_win = tk.Toplevel(self.root) # creates a new pop-up window btw
         tools_win.title("Tools")
         tools_win.geometry("500x300")
         tools_win.configure(bg="#1a1a2e")
