@@ -3,7 +3,6 @@
 
 ### Development Notes:
 - The app originally used Google's Speech Recognition API for audio identification but it was not properly optimised for music recognition. It was replaced with ShazamIO, which provides significantly more reliable song identification.
-- missing parenthesis pissed me the **** off
 - Some required Spotipy API scopes may be missing by default. Ensure all necessary scopes are included in your scope string. Note that scopes must be space-separated — a trailing space before the closing quote is mandatory when appending scopes, e.g. "user-read-playback-state "
 - ShazamIO deprecated recognize_song() in version 0.5.0 and replaced it with recognize(). If the app breaks after updating ShazamIO, ensure you are on v0.5.0 or later and that the method used is shazam.recognize() and not shazam.recognize_song()
 - Audio capture became significantly more reliable after switching from 2-channel (stereo) to 1-channel (mono) input.
