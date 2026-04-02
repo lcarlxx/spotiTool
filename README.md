@@ -1,5 +1,5 @@
 # spotiTool: Your all-in-one Tkinter GUI Spotify Companion
-## spotiTool v0.1.0
+## spotiTool v0.1.0 (22/03/2026)
 
 ### Development Notes:
 - The app originally used Google's Speech Recognition API for audio identification but it was not properly optimised for music recognition. It was replaced with ShazamIO, which provides significantly more reliable song identification.
