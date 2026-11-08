@@ -1,100 +1,135 @@
+
+from __future__ import annotations
+
+import hashlib
+import hmac
 import json
-import os
-from cryptography.fernet import Fernet
+import secrets
+from pathlib import Path
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_FILE = os.path.join(BASE_DIR, "user_data.json")
-KEY_FILE = os.path.join(BASE_DIR, "secret.key")
+from .config import USER_DATA_DIR
 
-# key management
-def load_or_create_key(): # creates an encryption key if one doesn't exist but loads an existing one if it does
+USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+DATA_FILE = USER_DATA_DIR / 'user_data.json'
 
-    if os.path.exists(KEY_FILE):
-        with open(KEY_FILE, "rb") as f:
-            key = f.read().strip()
-    else:
-        key = Fernet.generate_key()
-        with open(KEY_FILE, "wb") as f:
-            f.write(key)
-    
-    if isinstance(key, str):
-        key = key.encode()
+HASH_ALGORITHM = 'sha256'
+HASH_ITERATIONS = 200_000
+SALT_BYTES = 16
 
-    return Fernet(key)
 
-# storing the function in this variable will help us in the future to decrypt and encrypt things
-fernet = load_or_create_key()
+def _hash_password(password: str) -> str:
+    salt = secrets.token_bytes(SALT_BYTES)
+    digest = hashlib.pbkdf2_hmac(
+        HASH_ALGORITHM,
+        password.encode('utf-8'),
+        salt,
+        HASH_ITERATIONS,
+    )
+    return f'pbkdf2_{HASH_ALGORITHM}${HASH_ITERATIONS}${salt.hex()}${digest.hex()}'
 
-def encrypt_password(plain_password):
-    # now we're going to turn this plain password into unreadable encrypted text
-    return fernet.encrypt(plain_password.encode()).decode()
 
-def decrypt_password(encrypted_password):
-    # now to turn the unreadable encryption back to our plain password
-    return fernet.decrypt(encrypted_password.encode()).decode()
-
-"""
-.encode() - turns the password into bytes
-fernet.encrypt() - locks it with our secret key
-fernet.decrypt() - opens it with our secret key
-.decode() - turns the locked bytes back into a normal string (such that it can be saved into a JSON)
-"""
-
-# function to read all
-def load_users():
-    if not os.path.exists(DATA_FILE): # if user_data.json doesn't exist
-        return {} # returns an empty dictionary to prevent crashing
+def _verify_password(password: str, stored_hash: str) -> bool:
     try:
-        with open(DATA_FILE, "r") as f:
-            content = f.read().strip()
-            if not content:
-                return {}
-            return json.loads(content)
-    except json.JSONDecodeError:
-        os.rename(DATA_FILE, DATA_FILE + ".bak")
-        return {}   
-
-def save_users(users: dict): # users will be a dictionary
-    try:
-        tmp = DATA_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(users, f, indent=4)
-        os.replace(tmp, DATA_FILE)
-        return True
-    except Exception as e:
-        print(f"[ERROR] Failed to save users: {e}")
+        prefix, iterations, salt_hex, digest_hex = stored_hash.split('$', 3)
+        if not prefix.startswith('pbkdf2_'):
+            return False
+        algorithm = prefix.replace('pbkdf2_', '')
+        iterations = int(iterations)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(digest_hex)
+        candidate = hashlib.pbkdf2_hmac(
+            algorithm,
+            password.encode('utf-8'),
+            salt,
+            iterations,
+        )
+        return hmac.compare_digest(candidate, expected)
+    except Exception:
         return False
-    
-# create a new user
-def register_user(username, password):
-    # will use a tuple format of (True/False, "message")
-    users = load_users() # loads whatever users are saved
-    if username in users:
-        return False, "Username already exists!"
-    
-    users[username] = {
-        "password": encrypt_password(password),
-        "spotify_id": None # will be filled after spotify login
-    }
-    if save_users(users):
-        return True, "Account created!"
-    else:
-        return False, "Could not save account. Check folder permissions."  
-        
 
-def login_user(username, password):
+
+def load_users() -> dict[str, dict]:
+    if not DATA_FILE.exists():
+        return {}
+    try:
+        return json.loads(DATA_FILE.read_text(encoding='utf-8')) or {}
+    except json.JSONDecodeError:
+        backup_file = DATA_FILE.with_suffix('.json.bak')
+        DATA_FILE.replace(backup_file)
+        return {}
+
+
+def save_users(users: dict) -> bool:
+    try:
+        temp_file = DATA_FILE.with_suffix('.json.tmp')
+        temp_file.write_text(json.dumps(users, indent=4), encoding='utf-8')
+        temp_file.replace(DATA_FILE)
+        return True
+    except Exception:
+        return False
+
+
+def register_user(username: str, password: str) -> tuple[bool, str]:
+    users = load_users()
+    username = username.strip()
+    if not username:
+        return False, 'Username cannot be blank.'
+    if username in users:
+        return False, 'Username already exists.'
+    users[username] = {
+        'password_hash': _hash_password(password),
+        'spotify_id': None,
+        'remember_me': False,
+    }
+    return (True, 'Account created!') if save_users(users) else (False, 'Could not save account. Check folder permissions.')
+
+
+def login_user(username: str, password: str) -> tuple[bool, str]:
     users = load_users()
     if username not in users:
-        return False, "Username not found!"
-    
-    try:
-        decrypted = decrypt_password(users[username]["password"])
-        if decrypted == password:
-            return True, "Login Successful!"
-        else:
-            return False, "Incorrect password!"
-    except Exception:
-        return False, (
-            "Could not read your password — the secret.key file may have changed.\n"
-            "Delete both secret.key and user_data.json and create a fresh account."
-        )
+        return False, 'Username not found.'
+    password_hash = users[username].get('password_hash')
+    if not password_hash:
+        return False, 'No password is configured for this account.'
+    if _verify_password(password, password_hash):
+        return True, 'Login successful.'
+    return False, 'Incorrect password.'
+
+
+def set_remember_me(username: str, enabled: bool) -> None:
+    users = load_users()
+    if username not in users:
+        return
+    users[username]['remember_me'] = enabled
+    if enabled:
+        users[username]['last_logged_in'] = username
+    save_users(users)
+
+
+def get_remembered_user() -> str | None:
+    users = load_users()
+    for username, data in users.items():
+        if data.get('remember_me') and data.get('password_hash'):
+            return username
+    return None
+
+
+def clear_remember_me(username: str) -> None:
+    users = load_users()
+    if username not in users:
+        return
+    users[username]['remember_me'] = False
+    save_users(users)
+
+
+def set_user_playlist(username: str, playlist_uri: str) -> bool:
+    users = load_users()
+    if username not in users:
+        return False
+    users[username]['selected_playlist'] = playlist_uri
+    return save_users(users)
+
+
+def get_user_playlist(username: str) -> str | None:
+    users = load_users()
+    return users.get(username, {}).get('selected_playlist')

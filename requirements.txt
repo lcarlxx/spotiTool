@@ -1,7 +1,12 @@
 # Direct dependencies for spotiTool (transitive deps are resolved by pip)
-# NOTE: PyAudio has no prebuilt wheels for Python 3.14 — use Python 3.12/3.13.
+# NOTE: use Python 3.12/3.13 — some pinned wheels may not exist for 3.14.
+customtkinter>=5.2
+Pillow>=10
+requests>=2.31
+urllib3>=2.2
 sounddevice>=0.5.0
-scipy>=1.14
-spotipy>=2.25
+scipy>=1.13
+spotipy>=2.26
 shazamio>=0.8.1
-cryptography>=42
+yt-dlp>=2026.3.17
+mutagen>=1.47

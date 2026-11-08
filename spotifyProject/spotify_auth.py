@@ -1,119 +1,77 @@
+
+from __future__ import annotations
+
 import spotipy
-from spotipy.oauth2 import SpotifyOAuth # imports the login tool
-import json
-import os
-import re
+from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Local, gitignored file holding the Spotify API credentials.
-CREDENTIALS_FILE = os.path.join(BASE_DIR, "spotify_credentials.json")
-
-def load_spotify_credentials():
-    """Load Spotify API credentials.
-
-    Priority: environment variables (SPOTIFY_CLIENT_ID / SPOTIFY_CLIENT_SECRET)
-    → local spotify_credentials.json (gitignored).
-
-    Secrets must never be hardcoded in source — the previous client secret was
-    committed publicly and has to be rotated in the Spotify Developer Dashboard.
-    """
-    client_id = os.getenv("SPOTIFY_CLIENT_ID")
-    client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
-    if client_id and client_secret:
-        return client_id, client_secret
-    try:
-        with open(CREDENTIALS_FILE, "r") as f:
-            data = json.load(f)
-        return data["client_id"], data["client_secret"]
-    except (FileNotFoundError, KeyError, json.JSONDecodeError):
-        raise RuntimeError(
-            "Spotify API credentials not found.\n\n"
-            "Either set these environment variables:\n"
-            "  SPOTIFY_CLIENT_ID\n"
-            "  SPOTIFY_CLIENT_SECRET\n\n"
-            "or create a spotify_credentials.json file next to spotify_auth.py:\n"
-            '{"client_id": "...", "client_secret": "..."}'
-        )
-
-REDIRECT_URI = "http://127.0.0.1:8888/callback"
-# Default fallback used until the user picks their own playlist via the popup.
-# (Spotify dev-mode apps can't create playlists, so a real playlist ID is required.)
-PROJECT_SONGS_PLAYLIST_ID = "0ZyG7KYBa5cT8oJua0V4jJ"
-PLAYLIST_CONFIG_FILE = os.path.join(BASE_DIR, "playlist_config.json")
-
-# our permissions
-SCOPE = (
-    "user-read-playback-state "
-    "user-read-currently-playing "
-    "playlist-modify-public "
-    "playlist-modify-private "
-    "playlist-read-private "
-    "playlist-read-collaborative "
-    "user-top-read "
-    "user-read-recently-played"
+from .config import (
+    CACHE_PATH,
+    REDIRECT_URI,
+    SPOTIPY_CLIENT_ID,
+    SPOTIPY_CLIENT_SECRET,
+    USER_DATA_DIR,
+    validate_spotify_credentials,
 )
 
-def get_spotify_client(force_reauth=False):
-    cache_path = os.path.join(BASE_DIR, ".spotify_cache")
+USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    client_id, client_secret = load_spotify_credentials()
+SCOPE = (
+    'user-read-playback-state '
+    'user-read-currently-playing '
+    'playlist-modify-public '
+    'playlist-modify-private '
+    'playlist-read-private '
+    'playlist-read-collaborative '
+    'user-top-read '
+    'user-read-recently-played '
+    'user-library-read'
+)
 
-    # if the user wants to switch accounts, wipe the cached token first
-    if force_reauth and os.path.exists(cache_path):
-        os.remove(cache_path)
 
-    # opens a browser window asking the user to log in to Spotify
-    auth_manager=SpotifyOAuth(
-        client_id=client_id,
-        client_secret=client_secret,
+def get_spotify_client(force_reauth: bool = False) -> spotipy.Spotify:
+    validate_spotify_credentials()
+    if force_reauth and CACHE_PATH.exists():
+        CACHE_PATH.unlink()
+    auth_manager = SpotifyOAuth(
+        client_id=SPOTIPY_CLIENT_ID,
+        client_secret=SPOTIPY_CLIENT_SECRET,
         redirect_uri=REDIRECT_URI,
         scope=SCOPE,
-        cache_path=cache_path, # saves the token to prevent repeat logins
+        cache_path=str(CACHE_PATH),
         open_browser=True,
-        show_dialog=True
+        show_dialog=True,
     )
-    sp = spotipy.Spotify(auth_manager=auth_manager)
-    return sp
+    return spotipy.Spotify(auth_manager=auth_manager)
 
-def extract_playlist_id(text):
-    """Extract a Spotify playlist ID from a link/URI/bare ID.
 
-    Accepts things like:
-      https://open.spotify.com/playlist/0ZyG7KYBa5cT8oJua0V4jJ?si=...
-      spotify:playlist:0ZyG7KYBa5cT8oJua0V4jJ
-      0ZyG7KYBa5cT8oJua0V4jJ
-    """
-    text = (text or "").strip()
-    if not text:
-        return None
-    match = re.search(r"playlist[/:]([A-Za-z0-9]+)", text)
-    if match:
-        return match.group(1)
-    # a bare ID is a 22-character base62 string
-    if re.fullmatch(r"[A-Za-z0-9]{22}", text):
-        return text
-    return None
+def get_public_spotify_client() -> spotipy.Spotify:
+    validate_spotify_credentials()
+    return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
+        client_id=SPOTIPY_CLIENT_ID,
+        client_secret=SPOTIPY_CLIENT_SECRET,
+    ))
 
-def load_saved_playlist_id():
-    """Load the playlist ID the user picked in the popup (if any)."""
-    try:
-        with open(PLAYLIST_CONFIG_FILE, "r") as f:
-            data = json.load(f)
-            return data.get("playlist_id") or None
-    except (FileNotFoundError, json.JSONDecodeError):
-        return None
 
-def save_playlist_id(playlist_id):
-    """Remember the user's chosen playlist so they only have to paste it once."""
-    with open(PLAYLIST_CONFIG_FILE, "w") as f:
-        json.dump({"playlist_id": playlist_id}, f, indent=4)
+def get_or_create_playlist(sp: spotipy.Spotify, playlist_name: str = 'ProjectSongs') -> str:
+    user_id = sp.current_user()['id']
+    playlists = sp.current_user_playlists(limit=50)
+    while playlists:
+        for playlist in playlists['items']:
+            if playlist['name'] == playlist_name:
+                return playlist['id']
+        playlists = sp.next(playlists) if playlists.get('next') else None
+    new_playlist = sp.user_playlist_create(
+        user_id,
+        playlist_name,
+        public=False,
+        description='Songs found using SpotiTool Music recognition!',
+    )
+    return new_playlist['id']
 
-def add_song_to_playlist(sp: spotipy.Spotify, track_uri, playlist_id=None):
-    """Add a track to the user's chosen playlist.
 
-    Falls back to the saved playlist ID, then to the hardcoded default.
-    """
-    playlist_id = playlist_id or load_saved_playlist_id() or PROJECT_SONGS_PLAYLIST_ID
-    result = sp.playlist_add_items(playlist_id, [track_uri])
-    print("Added track:", result)
-    return playlist_id
+def add_song_to_playlist(sp: spotipy.Spotify, track_uri: str, playlist_uri: str | None = None) -> None:
+    playlist_id = playlist_uri.split(':')[-1] if playlist_uri and ':' in playlist_uri else playlist_uri
+    if not playlist_id:
+        playlist_id = get_or_create_playlist(sp)
+    sp.playlist_add_items(playlist_id, [track_uri])
