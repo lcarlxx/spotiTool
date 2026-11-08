@@ -6,13 +6,12 @@ import os
 import tempfile
 import threading
 from datetime import datetime
-from pathlib import Path
 from queue import Queue
 
 import customtkinter as ctk
 from tkinter import messagebox
 import requests
-import scipy.io.wavfile as wav
+import wave
 import sounddevice as sd
 import spotipy
 from PIL import Image
@@ -21,6 +20,7 @@ from shazamio import Shazam
 from urllib.parse import urlparse
 from urllib3.util.retry import Retry
 
+from .config import USER_DATA_DIR
 from .spotify_auth import add_song_to_playlist
 from .auth import get_user_playlist, set_user_playlist
 
@@ -29,14 +29,32 @@ ctk.set_default_color_theme("green")
 
 
 def extract_spotify_uri(url: str) -> str | None:
+    raw = (url or '').strip()
+    if not raw:
+        return None
+    if raw.startswith('spotify:'):
+        parts = raw.split(':')
+        if len(parts) >= 3 and parts[2]:
+            return f'spotify:{parts[1]}:{parts[2]}'
     try:
-        path = urlparse(url).path
+        path = urlparse(raw).path
         parts = [p for p in path.split('/') if p]
         if len(parts) >= 2:
-            return f'spotify:{parts[0]}:{parts[1]}'
+            return f'spotify:{parts[0]}:{parts[1].split("?")[0]}'
     except Exception:
         pass
+    if len(raw) == 22 and raw.isalnum():
+        return f'spotify:playlist:{raw}'
     return None
+
+
+def _write_wav(path: str, samplerate: int, recording) -> None:
+    """Write a mono int16 numpy recording to a WAV file using the stdlib."""
+    with wave.open(path, 'wb') as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(samplerate)
+        handle.writeframes(recording.tobytes())
 
 
 def _find_system_audio_device() -> int | None:
@@ -74,6 +92,13 @@ async def _recognize_with_shazam(audio_path: str) -> dict | None:
         result = await shazam.recognize(audio_path)
     except Exception:
         return None
+    finally:
+        # Release the aiohttp session, otherwise Python warns about
+        # "Unclosed client session" on exit.
+        try:
+            await shazam.close()
+        except Exception:
+            pass
     if not result or 'track' not in result:
         return None
     track = result['track']
@@ -85,28 +110,49 @@ async def _recognize_with_shazam(audio_path: str) -> dict | None:
     }
 
 
-def recognize_microphone(duration: int = 4, samplerate: int = 44100) -> dict | None:
-    device = _find_system_audio_device()
-    if device is None:
-        raise RuntimeError('No system audio loopback device found. Enable Stereo Mix or an equivalent device.')
+def record_audio(duration: int = 6, samplerate: int = 44100, source: str = 'system') -> str:
+    """Record audio and return the path to a temporary mono WAV file.
 
-    recording = sd.rec(int(duration * samplerate), samplerate=samplerate, channels=1, dtype='int16', device=device)
+    source='system' uses the loopback device (whatever the PC is playing);
+    source='mic' uses the default microphone.
+    """
+    if source == 'system':
+        device = _find_system_audio_device()
+        if device is None:
+            raise RuntimeError(
+                "No system audio loopback device found. Enable 'Stereo Mix' / "
+                "'What U Hear' in Windows sound settings, or use source='mic'."
+            )
+    else:
+        device = None  # default input device
+
+    recording = sd.rec(int(duration * samplerate), samplerate=samplerate,
+                       channels=1, dtype='int16', device=device)
     sd.wait()
 
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
-        wav.write(tmp.name, samplerate, recording)
-        temp_path = tmp.name
+    tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
+    tmp.close()
+    _write_wav(tmp.name, samplerate, recording)
+    return tmp.name
 
+
+def recognize_audio(duration: int = 6, samplerate: int = 44100,
+                    source: str = 'system') -> dict | None:
+    """Record audio, fingerprint it with Shazam, and return the match (or None)."""
+    path = record_audio(duration, samplerate, source)
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(_recognize_with_shazam(temp_path))
+        try:
+            return loop.run_until_complete(_recognize_with_shazam(path))
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
     finally:
         try:
-            os.remove(temp_path)
+            os.remove(path)
         except OSError:
             pass
-        asyncio.set_event_loop(None)
 
 
 class MusicRecognitionTool:
@@ -114,7 +160,7 @@ class MusicRecognitionTool:
         self.root = root
         self.sp = sp
         self.username = username
-        self.USER_DATA_DIR = Path(__file__).resolve().parent / 'user_data'
+        self.USER_DATA_DIR = USER_DATA_DIR
         self.USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
         self.RECENT_SONGS_FILE = self.USER_DATA_DIR / 'recent_songs.json'
         self.CACHE_DIR = self.USER_DATA_DIR / 'cover_cache'
@@ -145,11 +191,15 @@ class MusicRecognitionTool:
                      font=ctk.CTkFont('Helvetica', 18, 'bold'), fg_color='#1a1a2e', text_color='#1DB954').pack(pady=20)
 
         ctk.CTkLabel(self.root, text='Tap a button to identify a song',
-                     font=ctk.CTkFont('Helvetica', 11), fg_color='#1a1a2e', text_color='#aaaaaa').pack(pady=(0, 15))
+                     font=ctk.CTkFont('Helvetica', 11), fg_color='#1a1a2e', text_color='#aaaaaa').pack(pady=(0, 10))
+
+        ctk.CTkButton(self.root, text='🎙️\nListen via Microphone',
+                      font=ctk.CTkFont('Helvetica', 13, 'bold'), fg_color='#0f3460', text_color='white',
+                      width=280, height=52, command=self.listen_mic).pack(pady=5)
 
         ctk.CTkButton(self.root, text='🖥️\nDetect System Audio',
                       font=ctk.CTkFont('Helvetica', 13, 'bold'), fg_color='#0f3460', text_color='white',
-                      width=280, height=60, command=self.listen_system).pack(pady=8)
+                      width=280, height=52, command=self.listen_system).pack(pady=5)
 
         self.playlist_label = ctk.CTkLabel(self.root, text='', font=ctk.CTkFont('Helvetica', 9),
                                            fg_color='#1a1a2e', text_color='#aaaaaa')
@@ -283,10 +333,22 @@ class MusicRecognitionTool:
     def _process_audio(self, wav_path: str):
         self.set_status('🎵 Identifying with Shazam...')
         try:
-            result_dict = recognize_microphone()
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result_dict = loop.run_until_complete(_recognize_with_shazam(wav_path))
+            finally:
+                loop.close()
+                asyncio.set_event_loop(None)
         except Exception as exc:
             self.set_status(f'❌ Recognition failed: {exc}')
             return
+        finally:
+            try:
+                if os.path.exists(wav_path):
+                    os.remove(wav_path)
+            except OSError:
+                pass
         if not result_dict or not result_dict.get('title'):
             self.set_status('❌ Could not identify the song.\nTry louder or clearer audio.')
             return
@@ -319,6 +381,23 @@ class MusicRecognitionTool:
         except Exception as exc:
             self.set_status(f'❌ Spotify search error: {exc}')
 
+    def listen_mic(self):
+        threading.Thread(target=self._mic_worker, daemon=True).start()
+
+    def _mic_worker(self):
+        self.set_status('🎙️ Recording via microphone...\nPlay the song near your mic!')
+        try:
+            fs = 44100
+            duration = 6
+            recording = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16')
+            sd.wait()
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
+                wav_path = tmp.name
+            _write_wav(wav_path, fs, recording)
+            self._process_audio(wav_path)
+        except Exception as exc:
+            self.set_status(f'❌ Mic Error: {exc}')
+
     def listen_system(self):
         threading.Thread(target=self._system_audio_worker, daemon=True).start()
 
@@ -330,12 +409,12 @@ class MusicRecognitionTool:
                 self.set_status('❌ No system audio device found.\nEnable Stereo Mix in Windows sound settings.')
                 return
             fs = 44100
-            duration = 4
+            duration = 6
             recording = sd.rec(int(duration * fs), samplerate=fs, channels=1, dtype='int16', device=device)
             sd.wait()
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp:
                 wav_path = tmp.name
-            wav.write(wav_path, fs, recording)
+            _write_wav(wav_path, fs, recording)
             self._process_audio(wav_path)
         except Exception as exc:
             self.set_status(f'❌ System Audio Error: {exc}')
@@ -379,9 +458,12 @@ class MusicRecognitionTool:
             return
 
         try:
-            add_song_to_playlist(self.sp, resolved_uri, playlist_uri=current_playlist)
-            playlist = self.sp.playlist(current_playlist)
-            messagebox.showinfo('Success ✅', f"'{name}' was added to {playlist["name"]}!")
+            used_id = add_song_to_playlist(self.sp, resolved_uri, playlist_uri=current_playlist)
+            try:
+                playlist_name = self.sp.playlist(used_id).get('name', 'ProjectSongs')
+            except Exception:
+                playlist_name = 'ProjectSongs'
+            messagebox.showinfo('Success ✅', f"'{name}' was added to {playlist_name}!")
         except Exception as exc:
             messagebox.showerror('Error', f'Failed to add song:\n{exc}')
 
@@ -445,11 +527,12 @@ class MusicRecognitionTool:
         popup.bind('<Escape>', lambda e: popup.destroy())
 
     def go_back_to_home(self):
+        self.stop_loader = True
         self.root.destroy()
 
 
 if __name__ == '__main__':
-    from spotify_auth import get_spotify_client
+    from .spotify_auth import get_spotify_client
 
     root = ctk.CTk()
     app = MusicRecognitionTool(root, get_spotify_client(), 'test_user')

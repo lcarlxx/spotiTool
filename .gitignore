@@ -1,24 +1,33 @@
-# Spotify API credentials — never commit these
-spotify_credentials.json
+# ── Secrets (NEVER commit) ────────────────────────────────────────────────────
 .env
+spotify_credentials.json
 
-# Spotify auth token cache
+# ── Local user data / runtime state ───────────────────────────────────────────
+user_data/
 .spotify_cache
-
-# Local user data & encryption key
-user_data.json
-user_data.json.bak
-secret.key
-
-# Local playlist choice
+.cache
+*.cache
 playlist_config.json
 
-# Python
+# ── Downloads & build artefacts ───────────────────────────────────────────────
+Spotify FLAC Downloads/
+dist/
+build/
+*.exe
+*.spec.bak
+
+# ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
-*.pyc
+*.py[cod]
 .venv/
 venv/
+env/
 
-# OS junk
+# ── Draft sources ─────────────────────────────────────────────────────────────
+newPythonProject/
+
+# ── Editor / OS junk ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
 Thumbs.db
 .DS_Store

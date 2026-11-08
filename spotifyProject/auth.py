@@ -5,7 +5,6 @@ import hashlib
 import hmac
 import json
 import secrets
-from pathlib import Path
 
 from .config import USER_DATA_DIR
 

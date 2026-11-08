@@ -184,12 +184,30 @@ class SpotifyStatsPage:
 
     # ── Now Playing ───────────────────────────────────────────────────
 
+    def _alive(self) -> bool:
+        """True while this window still exists — stops orphaned timers/writers."""
+        try:
+            return bool(self.root.winfo_exists())
+        except Exception:
+            return False
+
+    def _safe_after(self, delay: int, callback):
+        """Schedule a UI update only if the window still exists."""
+        if not self._alive():
+            return None
+        try:
+            return self.root.after(delay, callback)
+        except Exception:
+            return None
+
     def set_now_playing(self, text: str):
-        self.root.after(0, lambda: self.now_playing_label.configure(text=text))
+        self._safe_after(0, lambda: self.now_playing_label.configure(text=text))
 
     def playback_refresh_loop(self):
+        if not self._alive():
+            return
         self.refresh_playback()
-        self.root.after(10_000, self.playback_refresh_loop)
+        self._safe_after(10_000, self.playback_refresh_loop)
 
     def refresh_playback(self):
         threading.Thread(target=self._refresh_playback_worker, daemon=True).start()
@@ -215,7 +233,10 @@ class SpotifyStatsPage:
                 album   = track.get('album', {})
                 ctk_img = None
                 if album.get('images'):
-                    ctk_img = self._fetch_image(album['images'][1]['url'], (80, 80))
+                    # Some albums only expose a single image — never index [1] blindly
+                    images = album['images']
+                    pick = images[1] if len(images) > 1 else images[0]
+                    ctk_img = self._fetch_image(pick['url'], (80, 80))
 
                 def update(img=ctk_img, t=text):
                     self.now_playing_label.configure(text=t)
@@ -223,15 +244,17 @@ class SpotifyStatsPage:
                         self.now_playing_image = img
                         self.now_playing_cover.configure(image=img)
 
-                self.root.after(0, update)
+                self._safe_after(0, update)
             else:
                 self.is_playing = False
                 self.set_now_playing('Nothing is currently playing.')
-                self.root.after(0, lambda: self.now_playing_cover.configure(image=None))
+                self._safe_after(0, lambda: self.now_playing_cover.configure(image=None))
         except Exception:
             self.set_now_playing('Status: Connection to Servers has been interrupted.')
 
     def update_progress_loop(self):
+        if not self._alive():
+            return
         if self.is_playing:
             elapsed = (time.time() - self.last_sync_time) * 1000
             current_ms = self.progress_ms + elapsed
@@ -247,7 +270,7 @@ class SpotifyStatsPage:
             else:
                 self.refresh_playback()
 
-        self.root.after(1_000, self.update_progress_loop)
+        self._safe_after(1_000, self.update_progress_loop)
 
     # ── Top Stats ─────────────────────────────────────────────────────
 
@@ -325,7 +348,7 @@ class SpotifyStatsPage:
                                  font=ctk.CTkFont(size=12),
                                  wraplength=150).pack(side='left', padx=5)
 
-            self.root.after(0, update_ui)
+            self._safe_after(0, update_ui)
 
         except Exception as e:
             print(f"Stats Error: {e}")
@@ -371,7 +394,7 @@ class SpotifyStatsPage:
                                  justify='left', anchor='w').pack(
                         side='left', padx=10)
 
-            self.root.after(0, update_ui)
+            self._safe_after(0, update_ui)
         except Exception:
             pass
 
@@ -385,7 +408,7 @@ class SpotifyStatsPage:
 
 
 if __name__ == '__main__':
-    from spotify_auth import get_spotify_client
+    from .spotify_auth import get_spotify_client
     root = ctk.CTk()
     SpotifyStatsPage(root, get_spotify_client())
     root.mainloop()

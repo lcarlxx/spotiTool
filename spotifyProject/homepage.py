@@ -1,9 +1,9 @@
-from pathlib import Path
 
 import customtkinter as ctk
 from PIL import Image
 from tkinter import messagebox
 
+from .config import RESOURCE_DIR
 from .spotify_auth import get_spotify_client
 
 # Color Palette
@@ -15,7 +15,7 @@ TEXT_SECONDARY = "#a8b2a8"
 DISABLED_COLOR = "#3a4d3a"
 
 # ── Logo loader ───────────────────────────────────────────────────────────────
-_LOGO_PATH = Path(__file__).resolve().parent / "spotiTool_logo-blurred.png"
+_LOGO_PATH = RESOURCE_DIR / "spotiTool_logo-blurred.png"
 
 def _load_logo(size: tuple[int, int]) -> ctk.CTkImage | None:
     """Return a CTkImage of the SpotiTool logo at the requested size, or None."""

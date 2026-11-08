@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import spotipy
@@ -6,10 +5,8 @@ from spotipy.oauth2 import SpotifyClientCredentials, SpotifyOAuth
 
 from .config import (
     CACHE_PATH,
-    REDIRECT_URI,
-    SPOTIPY_CLIENT_ID,
-    SPOTIPY_CLIENT_SECRET,
     USER_DATA_DIR,
+    get_spotify_credentials,
     validate_spotify_credentials,
 )
 
@@ -31,12 +28,13 @@ SCOPE = (
 
 def get_spotify_client(force_reauth: bool = False) -> spotipy.Spotify:
     validate_spotify_credentials()
+    client_id, client_secret, redirect_uri = get_spotify_credentials()
     if force_reauth and CACHE_PATH.exists():
         CACHE_PATH.unlink()
     auth_manager = SpotifyOAuth(
-        client_id=SPOTIPY_CLIENT_ID,
-        client_secret=SPOTIPY_CLIENT_SECRET,
-        redirect_uri=REDIRECT_URI,
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
         scope=SCOPE,
         cache_path=str(CACHE_PATH),
         open_browser=True,
@@ -47,9 +45,10 @@ def get_spotify_client(force_reauth: bool = False) -> spotipy.Spotify:
 
 def get_public_spotify_client() -> spotipy.Spotify:
     validate_spotify_credentials()
+    client_id, client_secret, _ = get_spotify_credentials()
     return spotipy.Spotify(auth_manager=SpotifyClientCredentials(
-        client_id=SPOTIPY_CLIENT_ID,
-        client_secret=SPOTIPY_CLIENT_SECRET,
+        client_id=client_id,
+        client_secret=client_secret,
     ))
 
 
@@ -70,8 +69,9 @@ def get_or_create_playlist(sp: spotipy.Spotify, playlist_name: str = 'ProjectSon
     return new_playlist['id']
 
 
-def add_song_to_playlist(sp: spotipy.Spotify, track_uri: str, playlist_uri: str | None = None) -> None:
+def add_song_to_playlist(sp: spotipy.Spotify, track_uri: str, playlist_uri: str | None = None) -> str:
     playlist_id = playlist_uri.split(':')[-1] if playlist_uri and ':' in playlist_uri else playlist_uri
     if not playlist_id:
         playlist_id = get_or_create_playlist(sp)
     sp.playlist_add_items(playlist_id, [track_uri])
+    return playlist_id

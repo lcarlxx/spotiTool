@@ -1,0 +1,4 @@
+# Development / packaging extras (not needed to run SpotiTool)
+-r requirements.txt
+pyinstaller>=6.0
+pyflakes>=3.0

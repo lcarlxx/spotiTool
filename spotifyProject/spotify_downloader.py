@@ -496,97 +496,44 @@ class ConversionTool:
                 self.update_track("")
     # ── Single-track download ─────────────────────────────────────────
 
+    def _selected_format(self) -> str:
+        """Normalise the dropdown label to a format keyword (flac/mp3/m4a/wav)."""
+        label = (self.format_dropdown.get() or 'mp3').lower()
+        if 'flac' in label:
+            return 'flac'
+        if 'wav' in label:
+            return 'wav'
+        if 'aac' in label or 'm4a' in label:
+            return 'm4a'
+        return 'mp3'
+
+    def _selected_bitrate(self) -> str:
+        text = self.bitrate_dropdown.get() or '320'
+        for value in ('128', '192', '256', '320'):
+            if value in text:
+                return value
+        return '320'
+
     def get_ydl_config(self, temp_file_template):
-        format_selected = self.format_dropdown.get().lower()
-        bitrate_text = self.bitrate_dropdown.get()
-        bitrate = '320'
-        if '128' in bitrate_text: bitrate = '128'
-        elif '256' in bitrate_text: bitrate = '256'
-
-        base_opts = {
-            'format':           'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
-            'outtmpl':          temp_file_template + '.%(ext)s',
-            'quiet':            True,
-            'no_warnings':      True,
-            'retries':          5,
-            'fragment_retries': 5,
-            'ignoreerrors':     False,
-            'noplaylist':       True,
-            'playlist_items':   '1',
-        }
-
-        if 'flac' in format_selected:
-            ext = 'flac'
-            base_opts['postprocessors'] = [{
-                'key':              'FFmpegExtractAudio',
-                'preferredcodec':   'flac',
-                'preferredquality': '0',
-            }]
-            base_opts['postprocessor_args'] = ['-vn', '-acodec', 'flac', '-compression_level', '8']
-
-        elif 'aac' in format_selected:
-            ext = 'm4a'
-            base_opts['postprocessors'] = [{
-                'key':              'FFmpegExtractAudio',
-                'preferredcodec':   'aac',
-                'preferredquality': '256',
-            }]
-            base_opts['postprocessor_args'] = ['-vn', '-acodec', 'aac', '-b:a', '256k']
-
-        elif 'wav' in format_selected:
-            ext = 'wav'
-            base_opts['postprocessors'] = [{
-                'key':              'FFmpegExtractAudio',
-                'preferredcodec':   'wav',
-            }]
-            base_opts['postprocessor_args'] = ['-vn', '-acodec', 'pcm_s16le']
-
-        else: # MP3
-            ext = 'mp3'
-            base_opts['postprocessors'] = [{
-                'key':              'FFmpegExtractAudio',
-                'preferredcodec':   'mp3',
-                'preferredquality': bitrate,
-            }]
-            base_opts['postprocessor_args'] = ['-vn', '-acodec', 'libmp3lame', '-q:a', {'128':'7', '256':'2', '320':'0'}[bitrate]]
-
-        return base_opts, ext
+        """Delegate to the shared builder so GUI and CLI behave identically."""
+        return get_ydl_config(
+            self._selected_format(),
+            self._selected_bitrate(),
+            temp_file_template,
+        )
 
     def download_single_track(self, search_query: str, track: dict, output_dir: str):
+        """Download one track using the shared, retry-capable implementation.
+
+        Returns "skipped" when the file already exists.
         """
-        Download best available audio from YouTube and encode in selected format.
-        Returns "skipped" if file already exists, otherwise None.
-        """
-        base_name  = self.sanitize_filename(f"{track['artist']} - {track['name']}")
-        ydl_opts, ext = self.get_ydl_config(base_name)
-
-        final_file = os.path.join(output_dir, f"{base_name}.{ext}")
-
-        if os.path.exists(final_file) and os.path.getsize(final_file) > 100_000:
-            print(f"  ↩ Exists: {base_name}")
-            return "skipped"
-
-        temp_dir           = tempfile.mkdtemp(prefix="audio_dl_")
-        temp_file_template = os.path.join(temp_dir, base_name)
-        ydl_opts['outtmpl'] = temp_file_template + '.%(ext)s'
-
-        try:
-            with YoutubeDL(ydl_opts) as ydl:
-                ydl.download([f"ytsearch1:{search_query}"])
-
-            output_files = [f for f in os.listdir(temp_dir) if f.lower().endswith(f'.{ext}')]
-            if not output_files:
-                raise FileNotFoundError(f"yt-dlp produced no {ext} file — is ffmpeg on PATH?")
-
-            temp_output = os.path.join(temp_dir, output_files[0])
-            if os.path.getsize(temp_output) < 100_000:
-                raise ValueError("Output file too small — likely a YouTube error page.")
-
-            shutil.move(temp_output, final_file)
-            self.embed_metadata(final_file, track)
-
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        return download_single_track(
+            search_query,
+            track,
+            output_dir,
+            format_selected=self._selected_format(),
+            bitrate=self._selected_bitrate(),
+        )
 
     # ── Metadata embedding ────────────────────────────────────────────
 
@@ -806,7 +753,11 @@ def build_search_query(track: dict) -> str:
     return f"{track['artist']} {track['name']} audio"
 
 
-def get_ydl_config(format_selected: str, bitrate: str, temp_file_template: str):
+def get_ydl_config(format_selected: str, bitrate: str, temp_file_template: str,
+                   player_clients: str | None = None,
+                   cookies_from_browser: str | None = None):
+    format_selected = (format_selected or 'mp3').lower()
+    bitrate = str(bitrate or '320').strip()
     base_opts = {
         'format':           'bestaudio[ext=m4a]/bestaudio[ext=webm]/bestaudio',
         'outtmpl':          temp_file_template + '.%(ext)s',
@@ -819,6 +770,18 @@ def get_ydl_config(format_selected: str, bitrate: str, temp_file_template: str):
         'playlist_items':   '1',
     }
 
+    # YouTube aggressively blocks unauthenticated clients (HTTP 403). Trying a
+    # few alternative player clients, or supplying browser cookies, fixes most
+    # of these failures. Overridable with SPOTITOOL_PLAYER_CLIENTS /
+    # SPOTITOOL_COOKIES_FROM_BROWSER environment variables.
+    clients = player_clients or os.getenv('SPOTITOOL_PLAYER_CLIENTS')
+    if clients:
+        base_opts['extractor_args'] = {'youtube': {'player_client': clients.split(',')}}
+
+    cookies = cookies_from_browser or os.getenv('SPOTITOOL_COOKIES_FROM_BROWSER')
+    if cookies:
+        base_opts['cookiesfrombrowser'] = (cookies,)
+
     if 'flac' in format_selected:
         ext = 'flac'
         base_opts['postprocessors'] = [{
@@ -828,7 +791,7 @@ def get_ydl_config(format_selected: str, bitrate: str, temp_file_template: str):
         }]
         base_opts['postprocessor_args'] = ['-vn', '-acodec', 'flac', '-compression_level', '8']
 
-    elif 'aac' in format_selected:
+    elif 'aac' in format_selected or 'm4a' in format_selected:
         ext = 'm4a'
         base_opts['postprocessors'] = [{
             'key':              'FFmpegExtractAudio',
@@ -847,12 +810,15 @@ def get_ydl_config(format_selected: str, bitrate: str, temp_file_template: str):
 
     else:
         ext = 'mp3'
+        # Accept any bitrate the user passes; fall back to the best quality (V0).
+        quality_map = {'128': '7', '192': '4', '256': '2', '320': '0'}
+        quality = quality_map.get(bitrate, '0')
         base_opts['postprocessors'] = [{
             'key':              'FFmpegExtractAudio',
             'preferredcodec':   'mp3',
-            'preferredquality': bitrate,
+            'preferredquality': quality,
         }]
-        base_opts['postprocessor_args'] = ['-vn', '-acodec', 'libmp3lame', '-q:a', {'128': '7', '256': '2', '320': '0'}[bitrate]]
+        base_opts['postprocessor_args'] = ['-vn', '-acodec', 'libmp3lame', '-q:a', quality]
 
     return base_opts, ext
 
@@ -968,41 +934,84 @@ def get_available_formats():
     return ['flac', 'mp3', 'aac', 'wav']
 
 
-def download_single_track(search_query: str, track: dict, output_dir: str, format_selected: str, bitrate: str):
+def _extension_for(format_selected: str) -> str:
+    """Map a user-facing format name to the output file extension."""
+    fmt = (format_selected or 'mp3').lower()
+    if 'flac' in fmt:
+        return 'flac'
+    if 'wav' in fmt:
+        return 'wav'
+    if 'aac' in fmt or 'm4a' in fmt:
+        return 'm4a'
+    return 'mp3'
+
+
+def download_single_track(search_query: str, track: dict, output_dir: str, format_selected: str, bitrate: str,
+                          player_clients: str | None = None,
+                          cookies_from_browser: str | None = None):
     base_name = sanitize_filename(f"{track['artist']} - {track['name']}")
-    ydl_opts, ext = get_ydl_config(format_selected, bitrate, os.path.join(output_dir, base_name))
-    final_file = os.path.join(output_dir, f"{base_name}.{ext}")
+    final_file = os.path.join(output_dir, f"{base_name}.{_extension_for(format_selected)}")
 
     if os.path.exists(final_file) and os.path.getsize(final_file) > 100_000:
         return 'skipped'
 
-    temp_dir = tempfile.mkdtemp(prefix='audio_dl_')
-    temp_file_template = os.path.join(temp_dir, base_name)
-    ydl_opts['outtmpl'] = temp_file_template + '.%(ext)s'
+    # Retry across player-client strategies: YouTube's default client often
+    # returns HTTP 403 for unauthenticated downloads.
+    strategies: list[str | None] = [player_clients]
+    if not cookies_from_browser and not os.getenv('SPOTITOOL_COOKIES_FROM_BROWSER'):
+        strategies += ['android_vr', 'ios', 'mweb', 'tv', 'web_safari']
 
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            ydl.download([f"ytsearch1:{search_query}"])
+    last_error: Exception | None = None
+    for strategy in dict.fromkeys(strategies):
+        temp_dir = tempfile.mkdtemp(prefix='audio_dl_')
+        temp_file_template = os.path.join(temp_dir, base_name)
+        ydl_opts, ext = get_ydl_config(
+            format_selected, bitrate, temp_file_template,
+            player_clients=strategy,
+            cookies_from_browser=cookies_from_browser,
+        )
+        try:
+            with YoutubeDL(ydl_opts) as ydl:
+                ydl.download([f"ytsearch1:{search_query}"])
 
-        output_files = [f for f in os.listdir(temp_dir) if f.lower().endswith(f'.{ext}')]
-        if not output_files:
-            raise FileNotFoundError(f"yt-dlp produced no {ext} file — is ffmpeg on PATH?")
+            output_files = [f for f in os.listdir(temp_dir) if f.lower().endswith(f'.{ext}')]
+            if not output_files:
+                raise FileNotFoundError(
+                    f"yt-dlp produced no {ext} file — is ffmpeg installed and on PATH?")
 
-        temp_output = os.path.join(temp_dir, output_files[0])
-        if os.path.getsize(temp_output) < 100_000:
-            raise ValueError('Output file too small — likely a YouTube error page.')
+            temp_output = os.path.join(temp_dir, output_files[0])
+            if os.path.getsize(temp_output) < 100_000:
+                raise ValueError('Output file too small — likely a YouTube error page.')
 
-        shutil.move(temp_output, final_file)
-        embed_metadata(final_file, track)
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+            shutil.move(temp_output, final_file)
+            embed_metadata(final_file, track)
+            return 'downloaded'
+        except Exception as exc:
+            last_error = exc
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    raise RuntimeError(
+        f"{last_error}\n"
+        "YouTube may be blocking this download. Try:\n"
+        "  • Updating yt-dlp:  pip install -U yt-dlp\n"
+        "  • Using browser cookies:  set SPOTITOOL_COOKIES_FROM_BROWSER=chrome"
+        " (or edge/firefox)"
+    )
 
 
-def download_track(sp, url, format='flac', bitrate='320', output_dir=None, progress_callback=None):
-    """Standalone download function usable by CLI and GUI"""
+def download_track(sp, url, format='flac', bitrate='320', output_dir=None, progress_callback=None,
+                   cookies_from_browser=None):
+    """Standalone download function usable by CLI and GUI.
+
+    Returns a result dict: {'target_dir', 'success', 'skipped', 'failed', 'errors'}.
+    Raises RuntimeError if every track failed, so callers never report false success.
+    """
 
     playlist_name, tracks = get_playlist_tracks(sp, url)
     total = len(tracks)
+    if total == 0:
+        raise RuntimeError('No downloadable tracks were found at that Spotify link.')
 
     base_output = output_dir if output_dir else os.path.join(os.getcwd(), 'Spotify FLAC Downloads')
     os.makedirs(base_output, exist_ok=True)
@@ -1016,10 +1025,15 @@ def download_track(sp, url, format='flac', bitrate='320', output_dir=None, progr
     success = 0
     failed = 0
     skipped = 0
+    errors: list[str] = []
 
     for i, track in enumerate(tracks):
         if progress_callback:
-            progress_callback((i / total) * 100)
+            try:
+                progress_callback((i / total) * 100)
+            except Exception:
+                pass
+        label = f"{track.get('artist', '?')} - {track.get('name', '?')}"
         try:
             result = download_single_track(
                 build_search_query(track),
@@ -1027,20 +1041,36 @@ def download_track(sp, url, format='flac', bitrate='320', output_dir=None, progr
                 target_dir,
                 format_selected=format,
                 bitrate=bitrate,
+                cookies_from_browser=cookies_from_browser,
             )
             if result == 'skipped':
                 skipped += 1
             else:
                 success += 1
-        except Exception:
+        except Exception as exc:
             failed += 1
+            errors.append(f"{label}: {exc}")
 
-    return target_dir
+    if success == 0 and failed > 0:
+        detail = '\n'.join(errors[:3])
+        raise RuntimeError(
+            f'All {failed} download(s) failed.\n{detail}'
+        )
+
+    return {
+        'target_dir': target_dir,
+        'success': success,
+        'skipped': skipped,
+        'failed': failed,
+        'errors': errors,
+    }
 
 
 # ====================== ENTRY POINT ======================
 if __name__ == "__main__":
     from .spotify_auth import get_spotify_client
+    if __package__ in (None, ''):
+        raise SystemExit('Run this module as: python -m spotifyProject.spotify_downloader')
 
     root = ctk.CTk()
     sp   = get_spotify_client()
