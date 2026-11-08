@@ -1,21 +1,58 @@
-# spotiTool: Your all-in-one Tkinter GUI Spotify Companion
-## spotiTool v0.1.0 (22/03/2026)
+# spotiTool: Your all-in-one Spotify Companion
 
-### Development Notes:
-- The app originally used Google's Speech Recognition API for audio identification but it was not properly optimised for music recognition. It was replaced with ShazamIO, which provides significantly more reliable song identification.
-- Some required Spotipy API scopes may be missing by default. Ensure all necessary scopes are included in your scope string. Note that scopes must be space-separated — a trailing space before the closing quote is mandatory when appending scopes, e.g. "user-read-playback-state "
-- ShazamIO deprecated recognize_song() in version 0.5.0 and replaced it with recognize(). If the app breaks after updating ShazamIO, ensure you are on v0.5.0 or later and that the method used is shazam.recognize() and not shazam.recognize_song()
-- Audio capture became significantly more reliable after switching from 2-channel (stereo) to 1-channel (mono) input.
-- Spotify has been progressively restricting its API since late 2024. Apps in development mode are now limited to 5 test users and cannot create playlists. As a workaround, a specific Spotify playlist ID must be hardcoded or provided by the user. **Fixed:** a popup now asks the user to paste a Spotify playlist link; the playlist ID is extracted automatically and remembered in `playlist_config.json`, so it only needs to be entered once.
-- When Shazam and Spotify searches were combined, the app would sometimes return a cover version by an obscure artist instead of the original, due to Spotify surfacing the first available match. This was fixed by separating the two searches — Shazam identifies the song first, then a separate Spotify search is performed using those results.
--  Spotify's search was too strict to reliably find songs that Shazam had already identified. An attempt to fix this using ShazamIO's Serialize to extract the URI returned a 400 error. The final fix was to extract the Spotify URI directly from Shazam's raw response data, where Shazam embeds a spotify:track:ID link under the hub.providers field, bypassing the Spotify search altogether.
+## spotiTool v0.2.0
 
-### Setup Info:
--  Spotify API credentials are no longer stored in the source code. Set the `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` environment variables, or create a `spotify_credentials.json` file next to `spotify_auth.py` containing `{"client_id": "...", "client_secret": "..."}`. (The old hardcoded secret was committed publicly — rotate it in the Spotify Developer Dashboard.)
--  PyAudio does not currently provide pre-compiled wheels for Python 3.14. Downgrade your Python environment to 3.13 or 3.12 before installing dependencies.
--  For system audio to work, you must install FFmpeg, add it to your system PATH, and restart your computer. **Updated:** system audio now uses WASAPI loopback recording (sounddevice 0.5+), which captures whatever the default output device is playing — so **Stereo Mix no longer needs to be enabled and the default recording device never needs to be changed**. If loopback is unavailable (e.g. older sounddevice or non-Windows), the app falls back to the classic Stereo Mix input method.
--  ~~If you want to switch to microphone input, remember to go back into your sound settings and set your default recording device from Stereo Mix back to your Microphone.~~ **No longer needed** — loopback recording does not touch the default recording device, so the microphone keeps working as-is.
+A Python Spotify companion app with a CustomTkinter GUI and a headless CLI:
 
-### Bugs and Fixes:
-- Always logged into the same spotify account regardless of user until I added a messagebox popup to ask if it was linked to that specific username to confirm.
-- ~~Audio capture still does not work when using wired earphones or Bluetooth audio devices.~~ **Fixed:** WASAPI loopback recording captures the default output device directly, so wired earphones and Bluetooth audio now work for system audio identification.
+- **Music recognition** — identify songs playing on your PC (system audio) or via the microphone, using Shazam
+- **Downloads** — grab audio for Spotify tracks/albums/playlists via yt-dlp, with metadata and cover art tagging
+- **Listening stats** — top artists, top tracks and recently played
+- **Playlist saving** — send identified songs straight to a playlist of your choice
+
+## Setup
+
+1. Use **Python 3.12 or 3.13** (3.14 lacks some prebuilt audio wheels).
+2. Install FFmpeg and add it to your system PATH (required for audio processing/downloads).
+3. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. Set your Spotify API credentials as environment variables (get them at https://developer.spotify.com/dashboard):
+   - `SPOTIPY_CLIENT_ID`
+   - `SPOTIPY_CLIENT_SECRET`
+   - optional: `SPOTIPY_REDIRECT_URI` (default: `http://127.0.0.1:8888/callback`)
+
+   Secrets are never stored in the source code. (Note: an old client secret exists in this repo's git history — rotate yours in the dashboard.)
+
+## Usage
+
+- GUI:
+  ```bash
+  python run.py
+  ```
+- CLI — test core features without launching the GUI:
+  ```bash
+  python -m spotifyProject login                     # run Spotify OAuth once, cache the token
+  python -m spotifyProject stats --range short       # top artists / tracks / recently played
+  python -m spotifyProject recognize                 # identify audio playing on this PC
+  python -m spotifyProject recognize --source mic    # ...via the microphone instead
+  python -m spotifyProject recognize --add --user myuser   # ...and save it to the playlist
+  python -m spotifyProject download <spotify-url> --format flac
+  ```
+  Run `python -m spotifyProject <command> --help` for all options.
+
+On first launch, confirm the linked Spotify account and paste a playlist link when asked — the app remembers it.
+
+## Notes & gotchas
+
+- Spotify dev-mode apps can't create playlists and are limited to 5 test users — point the app at an existing playlist.
+- Recognition works best with ~10 seconds of clean, mid-song audio; intros and quiet audio often fail — just retry.
+- System audio capture uses a loopback device (Stereo Mix / "What U Hear" / similar) and works regardless of your default recording device, so wired earphones and Bluetooth output both work.
+- Passwords are hashed with PBKDF2; tokens, user data and caches live in `user_data/` and are gitignored.
+- If ShazamIO is updated past v0.5.0, ensure `shazam.recognize()` is used (not the deprecated `recognize_song()`).
+
+## Development history (v0.1.0)
+
+- Google's Speech Recognition API was replaced with ShazamIO for far more reliable music identification.
+- Combining Shazam and Spotify searches sometimes returned cover versions by obscure artists; fixed by identifying with Shazam first, then using the Spotify URI embedded in Shazam's `hub.providers` response — bypassing Spotify search (whose strictness caused 400 errors with the old Serialize approach).
+- Scopes must be space-separated, with a mandatory trailing space before the closing quote, e.g. `"user-read-playback-state "`.
