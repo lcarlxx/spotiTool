@@ -2,28 +2,12 @@ import json
 import os
 from cryptography.fernet import Fernet
 
-"""
-# all account information will be saved here
-DATA_FILE = "user_data.json" # holds all usernames and encrypted passwords
-KEY_FILE = "secret.key" # stores the encryption key
-"""
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_FILE = os.path.join(BASE_DIR, "user_data.json")
 KEY_FILE = os.path.join(BASE_DIR, "secret.key")
 
 # key management
 def load_or_create_key(): # creates an encryption key if one doesn't exist but loads an existing one if it does
-    """
-    if not os.path.exists(KEY_FILE): # if the encryption key doesn not exist...
-        key = Fernet.generate_key()
-        with open(KEY_FILE, "wb") as f: # opens the file in binary mode (the encryption keys are not made with normal text) and names it f
-            f.write(key) # saves it such that it is not lost
-    else: # if the file does exist
-        with open(KEY_FILE, "rb") as f: # reads it in binary
-            key = f.read() # loads the key from the life and stores it in variable "key"
-    return Fernet(key)    
-    """
-    key_path = str(KEY_FILE)
 
     if os.path.exists(KEY_FILE):
         with open(KEY_FILE, "rb") as f:
@@ -71,10 +55,6 @@ def load_users():
         return {}   
 
 def save_users(users: dict): # users will be a dictionary
-    """
-    with open(DATA_FILE, "w") as f:
-        json.dump(users, f, indent=4) # indent=4 for readability
-    """
     try:
         tmp = DATA_FILE + ".tmp"
         with open(tmp, "w") as f:

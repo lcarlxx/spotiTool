@@ -1,0 +1,24 @@
+# Spotify API credentials — never commit these
+spotify_credentials.json
+.env
+
+# Spotify auth token cache
+.spotify_cache
+
+# Local user data & encryption key
+user_data.json
+user_data.json.bak
+secret.key
+
+# Local playlist choice
+playlist_config.json
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS junk
+Thumbs.db
+.DS_Store

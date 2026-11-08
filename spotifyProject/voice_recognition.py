@@ -7,7 +7,15 @@ import sounddevice as sd
 import scipy.io.wavfile as wav
 import tempfile, os
 import asyncio
+from tkinter import simpledialog
 from shazamio import Shazam
+from spotify_auth import (
+    add_song_to_playlist,
+    extract_playlist_id,
+    load_saved_playlist_id,
+    save_playlist_id,
+    PROJECT_SONGS_PLAYLIST_ID,
+)
 
 class voiceRecognitionTool:
     def __init__(self, root, sp: spotipy.Spotify):
@@ -194,20 +202,10 @@ class voiceRecognitionTool:
     def _mic_worker(self):
         self.set_status("🎙️ Recording via microphone...\nPlay the song near your mic!")
         try:
-            sample_rate = 44100
-            duration    = 10
-
-            recording = sd.rec(int(duration * sample_rate),
-                               samplerate=sample_rate,
-                               channels=1,
-                               dtype='int16')
+            recording = sd.rec(int(10 * 44100), samplerate=44100,
+                               channels=1, dtype='int16')
             sd.wait()
-
-            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            tmp.close()
-            wav.write(tmp.name, sample_rate, recording)
-            self._process_audio(tmp.name)
-
+            self._write_wav_and_process(recording, 44100)
         except Exception as e:
             self.set_status(f"❌ Mic Error: {e}")
 
@@ -220,30 +218,98 @@ class voiceRecognitionTool:
             sample_rate = 44100
             duration    = 10
 
-            recording = sd.rec(int(duration * sample_rate),
-                               samplerate=sample_rate,
-                               channels=1,
-                               dtype='int16')
-            sd.wait()
-
-            tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-            tmp.close()
-            wav.write(tmp.name, sample_rate, recording)
-            self._process_audio(tmp.name)
+            recording = self._record_system_audio(sample_rate, duration)
+            self._write_wav_and_process(recording, sample_rate)
 
         except Exception as e:
             self.set_status(f"❌ System audio error: {e}\n"
                             "Try enabling 'Stereo Mix' in Windows sound settings.")
 
+    def _write_wav_and_process(self, recording, sample_rate):
+        """Write a recording to a temp WAV file and hand it to Shazam."""
+        tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        tmp.close()
+        wav.write(tmp.name, sample_rate, recording)
+        self._process_audio(tmp.name)
+
+    def _record_system_audio(self, sample_rate, duration):
+        """Capture what the default OUTPUT device is playing.
+
+        On Windows, sounddevice 0.5+ supports WASAPI loopback recording.
+        This captures whatever the default output device plays — speakers,
+        wired earphones, Bluetooth — so no 'Stereo Mix' input device and no
+        fiddling with the default recording device is needed anymore.
+
+        Falls back to the classic default-input recording (Stereo Mix) when
+        loopback isn't available (e.g. non-Windows or older sounddevice).
+        """
+        frames = int(duration * sample_rate)
+        try:
+            wasapi = sd.WasapiSettings(loopback=True)
+            recording = sd.rec(frames,
+                               samplerate=sample_rate,
+                               channels=2,          # output devices are stereo
+                               dtype='int16',
+                               extra_settings=wasapi)
+            sd.wait()
+            # mix the stereo loopback capture down to mono — mono input was
+            # found to be much more reliable for song identification
+            recording = recording.mean(axis=1).astype('int16')
+            return recording
+        except (AttributeError, sd.PortAudioError, OSError):
+            # Fallback: record from the default INPUT device (Stereo Mix).
+            # For this to work, the default recording device must be set to
+            # Stereo Mix in Windows sound settings.
+            recording = sd.rec(frames,
+                               samplerate=sample_rate,
+                               channels=1,
+                               dtype='int16')
+            sd.wait()
+            return recording
+
     # save to playlist 
     def _ask_to_save(self, name, artist, uri):
         answer = messagebox.askyesno(
             "Add to Playlist?",
-            f"Found: {name} by {artist}\n\nAdd this to your 'ProjectSongs' playlist?"
+            f"Found: {name} by {artist}\n\nAdd this song to your playlist?"
         )
-        if answer:
-            try:
-                add_song_to_playlist(self.sp, uri)
-                messagebox.showinfo("Added! ✅", f"'{name}' added to ProjectSongs!")
-            except Exception as e:
-                messagebox.showerror("Error ❌", f"Failed to add song:\n{e}")
+        if not answer:
+            return
+
+        playlist_id = self._get_playlist_id()
+        if not playlist_id:
+            return  # user cancelled the playlist popup
+
+        try:
+            used_id = add_song_to_playlist(self.sp, uri, playlist_id)
+            messagebox.showinfo("Added! ✅", f"'{name}' added to your playlist!")
+        except Exception as e:
+            messagebox.showerror("Error ❌", f"Failed to add song:\n{e}")
+
+    def _get_playlist_id(self):
+        """Popup asking the user to paste a Spotify playlist link.
+
+        The playlist ID is extracted automatically from a link, URI or bare
+        ID, then remembered so the user is only asked once. Falls back to
+        the previously saved playlist, then to the hardcoded default.
+        """
+        saved = load_saved_playlist_id() or PROJECT_SONGS_PLAYLIST_ID
+        while True:
+            pasted = simpledialog.askstring(
+                "Choose Playlist",
+                "Paste a Spotify playlist link (you only need to do this once):",
+                initialvalue=f"https://open.spotify.com/playlist/{saved}",
+                parent=self.root,
+            )
+            if pasted is None:
+                return None  # cancelled
+            playlist_id = extract_playlist_id(pasted)
+            if playlist_id:
+                save_playlist_id(playlist_id)
+                return playlist_id
+            messagebox.showwarning(
+                "Invalid Link",
+                "That doesn't look like a Spotify playlist link.\n"
+                "Example: https://open.spotify.com/playlist/...",
+                parent=self.root,
+            )

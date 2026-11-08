@@ -133,12 +133,4 @@ class LoginScreen:
 if __name__ == "__main__":
     root = tk.Tk()
     LoginScreen(root)
-    # added this exception because ts pisses me off
-    try:
-        root.mainloop()
-    except KeyboardInterrupt:
-        res = messagebox.askyesno("User Error!", "Continue?")
-        if res:
-            root.mainloop()
-        else:
-            root.destroy()
+    root.mainloop()
