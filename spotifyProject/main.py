@@ -26,7 +26,7 @@ TEXT_SECONDARY = "#a8b2a8"
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("green")
 
-# ── Logo loader ───────────────────────────────────────────────────────────────
+# Logo loader
 _LOGO_PATH = RESOURCE_DIR / "spotiTool_logo-blurred.png"
 
 def _load_logo(size: tuple[int, int]) -> ctk.CTkImage | None:
@@ -53,7 +53,7 @@ class LoginScreen:
         self.build_ui()
 
     def build_ui(self):
-        # ── Title row: logo + "SpotiTool" ────────────────────────────
+        # Title row: logo + "SpotiTool"
         title_frame = ctk.CTkFrame(self.root, fg_color=BG_COLOR)
         title_frame.pack(pady=40)
 
@@ -118,7 +118,7 @@ class LoginScreen:
             text_color=TEXT_SECONDARY)
         self.status_label.pack(pady=15)
 
-    # ── Loading overlay ───────────────────────────────────────────────
+    # Loading overlay
 
     def _show_loading(self, message="Connecting to Spotify..."):
         """Cover the login form with an animated loading overlay."""
@@ -167,7 +167,7 @@ class LoginScreen:
             self._loading_overlay.destroy()
         self._loading_overlay = None
 
-    # ── Login / Register ──────────────────────────────────────────────
+    # Login / Register
 
     def handle_login(self):
         username = self.username_entry.get().strip()
@@ -196,7 +196,7 @@ class LoginScreen:
         else:
             self.status_label.configure(text=message)
 
-    # ── Spotify auth (threaded) ───────────────────────────────────────
+    # Spotify auth (threaded)
 
     def verify_spotify_account(self, username):
         """Connect to Spotify in a background thread so the UI stays responsive."""
@@ -262,7 +262,7 @@ class LoginScreen:
         self._hide_loading()
         messagebox.showerror("Spotify Error", f"Spotify linking failed:\n{err_msg}")
 
-    # ── Navigation ────────────────────────────────────────────────────
+    # Navigation
 
     def open_homepage(self, username):
         self.root.destroy()

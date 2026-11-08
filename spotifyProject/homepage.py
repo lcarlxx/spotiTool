@@ -14,7 +14,7 @@ SECONDARY      = "#457e59"
 TEXT_SECONDARY = "#a8b2a8"
 DISABLED_COLOR = "#3a4d3a"
 
-# ── Logo loader ───────────────────────────────────────────────────────────────
+# Logo loader
 _LOGO_PATH = RESOURCE_DIR / "spotiTool_logo-blurred.png"
 
 def _load_logo(size: tuple[int, int]) -> ctk.CTkImage | None:
@@ -41,7 +41,7 @@ class HomePage:
         self.build_ui()
 
     def build_ui(self):
-        # ── Header Bar ───────────────────────────────────────────────
+        # Header Bar
         header = ctk.CTkFrame(self.root, fg_color=BG_COLOR, corner_radius=0)
         header.pack(fill="x", pady=15)
 
@@ -108,7 +108,7 @@ class HomePage:
             btn.pack(pady=10)
             self._buttons.append(btn)
 
-    # ── Button state helpers ──────────────────────────────────────────
+    # Button state helpers
 
     def _set_buttons_loading(self, active_label: str):
         """Disable all feature buttons and show which tool is opening."""
@@ -122,7 +122,7 @@ class HomePage:
             btn.configure(state="normal", fg_color=PRIMARY)
         self._status_label.configure(text="")
 
-    # ── Tool launchers ────────────────────────────────────────────────
+    # Tool launchers
 
     def launch_recognition(self):
         self._set_buttons_loading("Music Recognition")
@@ -163,7 +163,7 @@ class HomePage:
 
         self.root.after(50, open_tool)
 
-    # ── About ─────────────────────────────────────────────────────────
+    # About
 
     def show_about(self):
         messagebox.showinfo(

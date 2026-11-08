@@ -106,7 +106,7 @@ class ConversionTool:
                                         fg_color="#232723", text_color="#aaaaaa", wraplength=660)
         self.track_label.pack(pady=5)
 
-        # ── Action buttons row ────────────────────────────────────────
+        # Action buttons row
         btn_row = ctk.CTkFrame(self.root, fg_color="#232723")
         btn_row.pack(pady=15)
 
@@ -140,7 +140,7 @@ class ConversionTool:
             self.bitrate_label.pack_forget()
             self.bitrate_dropdown.pack_forget()
 
-    # ── Link popup ────────────────────────────────────────────────────
+    # Link popup
 
     def open_link_popup(self):
         popup = ctk.CTkToplevel(self.root)
@@ -179,7 +179,7 @@ class ConversionTool:
         popup.bind("<Return>", lambda e: confirm())
         popup.bind("<Escape>", lambda e: popup.destroy())
 
-    # ── Helpers ───────────────────────────────────────────────────────
+    # Helpers
 
     def sanitize_filename(self, name: str) -> str:
         sanitized = re.sub(r'[<>:"/\\|?*]', "_", name).strip()
@@ -201,7 +201,7 @@ class ConversionTool:
         os.makedirs(output_dir, exist_ok=True)
         try:
             if os.name == 'nt':
-                os.startfile(output_dir)  # noqa: S606 - launching Explorer is intended
+                os.startfile(output_dir)  # noqa: S606 launching Explorer is intended
             elif sys.platform == 'darwin':
                 # argv list, never a shell string: avoids command injection via paths
                 subprocess.run(['open', output_dir], check=False)
@@ -210,7 +210,7 @@ class ConversionTool:
         except Exception as exc:
             print(f'Could not open folder: {exc}')
 
-    # ── Download control ──────────────────────────────────────────────
+    # Download control
 
     def start_download(self):
         if self.downloading:
@@ -236,7 +236,7 @@ class ConversionTool:
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
 
-    # ── Spotify metadata fetching ─────────────────────────────────────
+    # Spotify metadata fetching
 
     def get_playlist_tracks(self, url: str):
         """
@@ -271,7 +271,7 @@ class ConversionTool:
         track = item.get('track') if isinstance(item, dict) and 'track' in item else item
         if not track:
             return False
-        # Also guard against track-level is_local (some API versions set both)
+        # Also guard against track level is_local (some API versions set both)
         if track.get('is_local'):
             return False
         if track.get('type') == 'episode':  # podcast episode in playlist
@@ -330,7 +330,7 @@ class ConversionTool:
             # Paginate — Spotify returns max 100 items per page
             page = self.sp.next(page) if page.get('next') else None
             if page:
-                time.sleep(0.1)     # gentle rate-limit respect
+                time.sleep(0.1)     # gentle rate limit respect
 
         self.update_status(f"Fetched {len(tracks)} tracks from \"{name}\"")
         return name, tracks
@@ -364,7 +364,7 @@ class ConversionTool:
                     disc_number=track.get('disc_number', 1),
                 ))
 
-            # Paginate — rare but necessary for large / multi-disc releases
+            # Paginate — rare but necessary for large / multi disc releases
             page = self.sp.next(page) if page.get('next') else None
             if page:
                 time.sleep(0.1)
@@ -385,7 +385,7 @@ class ConversionTool:
             disc_number=track.get('disc_number', 1),
         )]
 
-    # ── YouTube search query builder ──────────────────────────────────
+    # YouTube search query builder
 
     def build_search_query(self, track: dict) -> str:
         """
@@ -429,7 +429,7 @@ class ConversionTool:
 
         return f"{track['artist']} {track['name']} audio"
 
-    # ── Collection download loop ──────────────────────────────────────
+    # Collection download loop
 
     def download_collection(self, url: str):
             try:
@@ -451,10 +451,10 @@ class ConversionTool:
                 os.makedirs(base_output, exist_ok=True)
 
                 if total == 1:
-                    # Single track - save directly to base folder
+                    # Single track save directly to base folder
                     output_dir = base_output
                 else:
-                    # Playlist / Album - create dedicated subfolder
+                    # Playlist / Album create dedicated subfolder
                     output_dir = os.path.join(
                         base_output,
                         self.sanitize_filename(playlist_name)
@@ -502,7 +502,7 @@ class ConversionTool:
             finally:
                 self.safe_after(self._reset_buttons)
                 self.update_track("")
-    # ── Single-track download ─────────────────────────────────────────
+    # Single track download
 
     def _selected_format(self) -> str:
         """Normalise the dropdown label to a format keyword (flac/mp3/m4a/wav)."""
@@ -543,7 +543,7 @@ class ConversionTool:
             bitrate=self._selected_bitrate(),
         )
 
-    # ── Metadata embedding ────────────────────────────────────────────
+    # Metadata embedding
 
     def embed_metadata(self, flac_file: str, track: dict):
         try:
@@ -586,7 +586,7 @@ class ConversionTool:
         except Exception as e:
             print(f"  ⚠ Metadata error: {e}")
 
-    # ── Thread-safe UI helpers ────────────────────────────────────────
+    # Thread safe UI helpers
 
     def safe_after(self, func):
         self.root.after(0, func)
@@ -963,7 +963,7 @@ def download_single_track(search_query: str, track: dict, output_dir: str, forma
     if os.path.exists(final_file) and os.path.getsize(final_file) > 100_000:
         return 'skipped'
 
-    # Retry across player-client strategies: YouTube's default client often
+    # Retry across player client strategies: YouTube's default client often
     # returns HTTP 403 for unauthenticated downloads.
     strategies: list[str | None] = [player_clients]
     if not cookies_from_browser and not os.getenv('SPOTITOOL_COOKIES_FROM_BROWSER'):

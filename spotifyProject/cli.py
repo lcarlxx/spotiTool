@@ -28,7 +28,7 @@ from .spotify_auth import add_song_to_playlist, get_public_spotify_client, get_s
 TIME_RANGES = {"short": "short_term", "medium": "medium_term", "long": "long_term"}
 
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+# helpers
 
 def _out(msg: str = "") -> None:
     print(msg, flush=True)
@@ -48,7 +48,7 @@ def _spotify_for_reads():
     return get_public_spotify_client()
 
 
-# ── validate ──────────────────────────────────────────────────────────────────
+# validate
 
 def cmd_validate(args) -> int:
     """Check that credentials and environment are set up correctly."""
@@ -109,7 +109,7 @@ def cmd_validate(args) -> int:
     return 1
 
 
-# ── login ─────────────────────────────────────────────────────────────────────
+# login
 
 def cmd_login(args) -> int:
     validate_spotify_credentials()
@@ -121,7 +121,7 @@ def cmd_login(args) -> int:
     return 0
 
 
-# ── stats ─────────────────────────────────────────────────────────────────────
+# stats
 
 def cmd_stats(args) -> int:
     try:
@@ -180,7 +180,7 @@ def cmd_stats(args) -> int:
     return 0 if failures == 0 else 1
 
 
-# ── recognize ─────────────────────────────────────────────────────────────────
+# recognize
 
 def _write_wav(path: str, samplerate: int, recording) -> None:
     """Write a mono int16 numpy recording to a WAV file using the stdlib."""
@@ -296,7 +296,7 @@ def cmd_recognize(args) -> int:
     return 0
 
 
-# ── download ──────────────────────────────────────────────────────────────────
+# download
 
 def cmd_download(args) -> int:
     from .spotify_downloader import download_track
@@ -335,7 +335,7 @@ def cmd_download(args) -> int:
     return 0 if result["failed"] == 0 else 1
 
 
-# ── gui ───────────────────────────────────────────────────────────────────────
+# gui
 
 def cmd_gui(args) -> int:
     try:
@@ -349,7 +349,7 @@ def cmd_gui(args) -> int:
     return 0
 
 
-# ── argument parsing ──────────────────────────────────────────────────────────
+# argument parsing
 
 def _prog_name() -> str:
     """Show the real executable name when frozen, the module path otherwise."""

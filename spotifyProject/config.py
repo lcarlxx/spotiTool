@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# Paths
 #Writable directory next to the executable (or package dir when running from source)
 if getattr(sys, "frozen", False):
     BASE_DIR = Path(sys.executable).resolve().parent
@@ -17,7 +17,7 @@ else:
 # Where user accounts and app data are stored
 USER_DATA_DIR = BASE_DIR / "user_data"
 
-# Where spotipy caches the OAuth token so you don't re-login every launch
+# Where spotipy caches the OAuth token so you don't re login every launch
 CACHE_PATH = USER_DATA_DIR / ".spotify_cache"
 
 
@@ -79,11 +79,11 @@ def _load_credentials() -> tuple[str, str, str]:
     return client_id, client_secret, redirect_uri
 
 
-# ── Spotify API Credentials ───────────────────────────────────────────────────
+# Spotify API Credentials
 SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, REDIRECT_URI = _load_credentials()
 
 
-# ── Validation ────────────────────────────────────────────────────────────────
+# Validation
 def get_spotify_credentials() -> tuple[str, str, str]:
     """Re-read credentials on demand (picks up env changes made at runtime)."""
     global SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, REDIRECT_URI

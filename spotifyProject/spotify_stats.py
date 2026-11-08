@@ -31,7 +31,7 @@ class SpotifyStatsPage:
         self.now_playing_image = None
         self.recent_images: list[ctk.CTkImage] = []
 
-        # Thread-safe image cache — fetched in worker threads, read anywhere
+        # Thread safe image cache — fetched in worker threads, read anywhere
         self._image_cache: dict[str, ctk.CTkImage] = {}
         self._cache_lock = threading.Lock()
 
@@ -64,7 +64,7 @@ class SpotifyStatsPage:
         self.playback_refresh_loop()
         self.update_progress_loop()
 
-    # ── UI construction ───────────────────────────────────────────────
+    # UI construction
 
     def build_ui(self):
         ctk.CTkLabel(self.main_scrollable, text='Spotify Stats 🎶',
@@ -125,7 +125,7 @@ class SpotifyStatsPage:
             self.recent_frame, fg_color=BG, height=250)
         self.recent_scrollable.pack(fill='both', expand=True, padx=10, pady=(0, 10))
 
-    # ── Skeleton loaders ──────────────────────────────────────────────
+    # Skeleton loaders
 
     def _skeleton_row(self, parent, img_size=40):
         """Return a single greyed-out placeholder row."""
@@ -160,7 +160,7 @@ class SpotifyStatsPage:
         for _ in range(count):
             self._skeleton_row(self.recent_scrollable, img_size=50)
 
-    # ── Image helpers ─────────────────────────────────────────────────
+    # Image helpers
 
     def _fetch_image(self, img_url: str, size: tuple) -> ctk.CTkImage | None:
         """
@@ -182,7 +182,7 @@ class SpotifyStatsPage:
         except Exception:
             return None
 
-    # ── Now Playing ───────────────────────────────────────────────────
+    # Now Playing
 
     def _alive(self) -> bool:
         """True while this window still exists — stops orphaned timers/writers."""
@@ -272,7 +272,7 @@ class SpotifyStatsPage:
 
         self._safe_after(1_000, self.update_progress_loop)
 
-    # ── Top Stats ─────────────────────────────────────────────────────
+    # Top Stats
 
     def refresh_top_stats(self):
         # Show skeleton immediately, then fetch in the background
@@ -291,7 +291,7 @@ class SpotifyStatsPage:
             top_artists = self.sp.current_user_top_artists(limit=5, time_range=selected_range)
             top_tracks  = self.sp.current_user_top_tracks(limit=5,  time_range=selected_range)
 
-            # ── Pre-fetch ALL images here in the worker thread ────────
+            # Pre fetch ALL images here in the worker thread
             # This is the critical fix: image downloads no longer block
             # the main (UI) thread.
             artist_data = []
@@ -309,7 +309,7 @@ class SpotifyStatsPage:
                     img = self._fetch_image(album['images'][-1]['url'], (40, 40))
                 track_data.append({'rank': i, 'name': track['name'], 'img': img})
 
-            # ── UI update — no network calls inside ───────────────────
+            # UI update — no network calls inside
             def update_ui(ad=artist_data, td=track_data):
                 # Artists
                 for w in self.top_artists_frame.winfo_children():
@@ -353,7 +353,7 @@ class SpotifyStatsPage:
         except Exception as e:
             print(f"Stats Error: {e}")
 
-    # ── Recently Played ───────────────────────────────────────────────
+    # Recently Played
 
     def refresh_recently_played(self):
         self._show_recent_skeleton()
@@ -363,7 +363,7 @@ class SpotifyStatsPage:
         try:
             recent_played = self.sp.current_user_recently_played(limit=10)
 
-            # Pre-fetch all thumbnails in the worker thread
+            # Pre fetch all thumbnails in the worker thread
             items_data = []
             for item in recent_played.get('items', []):
                 track  = item['track']
@@ -398,7 +398,7 @@ class SpotifyStatsPage:
         except Exception:
             pass
 
-    # ── Utility ───────────────────────────────────────────────────────
+    # Utility
 
     def ms_to_time(self, ms) -> str:
         if not ms or ms < 0:
