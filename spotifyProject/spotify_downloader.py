@@ -4,6 +4,8 @@ import spotipy
 import os
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -198,9 +200,15 @@ class ConversionTool:
         output_dir = os.path.join(os.getcwd(), "Spotify FLAC Downloads")
         os.makedirs(output_dir, exist_ok=True)
         try:
-            os.startfile(output_dir)
-        except AttributeError:
-            os.system(f'open "{output_dir}"' if os.name == 'posix' else f'xdg-open "{output_dir}"')
+            if os.name == 'nt':
+                os.startfile(output_dir)  # noqa: S606 - launching Explorer is intended
+            elif sys.platform == 'darwin':
+                # argv list, never a shell string: avoids command injection via paths
+                subprocess.run(['open', output_dir], check=False)
+            else:
+                subprocess.run(['xdg-open', output_dir], check=False)
+        except Exception as exc:
+            print(f'Could not open folder: {exc}')
 
     # ── Download control ──────────────────────────────────────────────
 

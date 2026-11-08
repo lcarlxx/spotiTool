@@ -28,6 +28,8 @@ one program.
 7. [Troubleshooting](#7-troubleshooting)
 8. [Project layout](#8-project-layout)
 9. [FAQ / notes](#9-faq--notes)
+10. [Security](#10-security)
+11. [License](#11-license)
 
 ---
 
@@ -520,6 +522,51 @@ still required for downloads.
 
 **Legal note:** downloading audio may violate Spotify's and YouTube's terms of service.
 Use it only for content you have the right to download.
+
+---
+
+## 10. Security
+
+SpotiTool is entirely local — no server, no telemetry. Full details are in
+[SECURITY.md](SECURITY.md); the short version:
+
+- **Passwords** are hashed with PBKDF2-HMAC-SHA256 (200k iterations, per-user salt)
+  and compared in constant time. They are app passwords, not your Spotify password.
+- **Spotify API credentials** are never in the source code — they come from env vars,
+  `.env`, or a gitignored `spotify_credentials.json`.
+- **Spotify login tokens** are cached locally in `user_data/.spotify_cache` in
+  plaintext (standard for spotipy). Anyone who can read your user profile can use
+  that token — revoke access at <https://www.spotify.com/account/apps/>.
+- No `eval`/`exec`/`pickle`/`shell=True`, no disabled TLS verification, filenames
+  from remote metadata are sanitised, and folder-opening uses argv lists (no shell).
+
+**Two things you must do yourself:**
+
+1. **Rotate your client secret** if you ever committed one (this repo's history
+   contained one before v1.0). Dashboard → **Settings → Reset secret**.
+2. **Treat the `.exe` as public** — never embed a client secret in a distributed
+   build; each user supplies their own credentials.
+
+Report vulnerabilities privately (see [SECURITY.md](SECURITY.md)), not via public issues.
+
+---
+
+## 11. License
+
+MIT — see [LICENSE](LICENSE).
+
+```
+Copyright (c) 2026 lcarlxx
+```
+
+You may use, modify, and redistribute this software, including commercially,
+provided the copyright notice and permission notice are retained. The software
+is provided **as is**, without warranty of any kind.
+
+Third-party components keep their own licenses: spotipy (MIT), ShazamIO (MIT),
+CustomTkinter (MIT), yt-dlp (Unlicense), mutagen (GPL-2.0+), Pillow (HPND),
+sounddevice (MIT), requests (Apache-2.0). Note that **mutagen is GPL-2.0+** — if you
+distribute a modified build, review how that interacts with your licensing plans.
 
 ---
 
