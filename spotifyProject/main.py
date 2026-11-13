@@ -13,6 +13,7 @@ from .auth import (
     set_remember_me,
 )
 from .config import RESOURCE_DIR
+from .logging_setup import setup_logging
 from .spotify_auth import get_spotify_client
 from .homepage import HomePage
 
@@ -272,6 +273,7 @@ class LoginScreen:
 
 
 def main():
+    setup_logging()
     root = ctk.CTk()
     remembered_user = get_remembered_user()
     if remembered_user:

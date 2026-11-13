@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spotitool"
+description = "Spotify companion desktop app and CLI: Shazam song recognition, listening stats and downloads."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{ name = "lcarlxx" }]
+keywords = ["spotify", "shazam", "music-recognition", "downloader", "customtkinter"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: Microsoft :: Windows",
+    "License :: OSI Approved :: MIT License",
+]
+dynamic = ["version", "dependencies"]
+
+[project.scripts]
+spotitool = "spotifyProject.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/lcarlxx/spotiTool"
+Security = "https://github.com/lcarlxx/spotiTool/blob/main/SECURITY.md"
+
+[tool.setuptools]
+packages = ["spotifyProject"]
+
+[tool.setuptools.dynamic]
+version = { attr = "spotifyProject.__version__" }
+dependencies = { file = ["requirements.txt"] }
+
+[tool.setuptools.package-data]
+spotifyProject = ["spotiTool_logo-blurred.png"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.pyflakes]
+files = ["spotifyProject", "tests", "run.py", "run_cli.py", "bootstrap.py"]

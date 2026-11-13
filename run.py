@@ -3,12 +3,12 @@
 Run from source with:  python run.py
 Or use the packaged executable:  SpotiTool.exe
 """
-import os
 import sys
 import traceback
 
-# Make `import spotifyProject` work both from source and inside a frozen bundle.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from bootstrap import ensure_import_path
+
+ensure_import_path()
 
 
 def _report_error(message: str) -> None:

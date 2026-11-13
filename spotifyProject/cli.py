@@ -22,6 +22,7 @@ import sounddevice as sd
 
 from . import __version__
 from .config import CACHE_PATH, USER_DATA_DIR, get_spotify_credentials, validate_spotify_credentials
+from .logging_setup import setup_logging
 from .music_recognition import _find_system_audio_device, _recognize_with_shazam
 from .spotify_auth import add_song_to_playlist, get_public_spotify_client, get_spotify_client
 
@@ -415,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
         except (AttributeError, OSError):
             pass
 
+    setup_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
     try:

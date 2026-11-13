@@ -1,3 +1,5 @@
+import logging
+
 import customtkinter as ctk
 from tkinter import messagebox
 import spotipy
@@ -18,6 +20,8 @@ from mutagen.mp3 import MP3
 from mutagen.id3 import ID3, TIT2, TPE1, TALB, TRCK, TPOS, APIC, ID3NoHeaderError
 from mutagen.mp4 import MP4, MP4Cover
 from mutagen.wave import WAVE
+
+logger = logging.getLogger(__name__)
 
 ctk.set_appearance_mode('dark')
 ctk.set_default_color_theme('green')
@@ -182,19 +186,7 @@ class ConversionTool:
     # Helpers
 
     def sanitize_filename(self, name: str) -> str:
-        sanitized = re.sub(r'[<>:"/\\|?*]', "_", name).strip()
-        return re.sub(r'[\.\s]+$', '', sanitized)[:150]
-
-    def normalize_string(self, s: str) -> str:
-        """Normalize string for fuzzy matching."""
-        if not s:
-            return ""
-        s = s.lower()
-        for pat in [r'\(remastered.*?\)', r'\[remastered.*?\]', r'\(remix.*?\)',
-                    r'\(version.*?\)', r'\(feat.*?\)', r'\(ft.*?\)', r'\(official.*?\)']:
-            s = re.sub(pat, '', s, flags=re.IGNORECASE)
-        s = re.sub(r'[^\w\s]', '', s)
-        return re.sub(r'\s+', ' ', s).strip()
+        return sanitize_filename(name)
 
     def open_output_folder(self):
         output_dir = os.path.join(os.getcwd(), "Spotify FLAC Downloads")
@@ -208,7 +200,7 @@ class ConversionTool:
             else:
                 subprocess.run(['xdg-open', output_dir], check=False)
         except Exception as exc:
-            print(f'Could not open folder: {exc}')
+            logger.warning('Could not open folder: %s', exc)
 
     # Download control
 
@@ -239,197 +231,10 @@ class ConversionTool:
     # Spotify metadata fetching
 
     def get_playlist_tracks(self, url: str):
-        """
-        Return (collection_name, [track_dict, …]) for a playlist, album, or track.
-
-        Each track_dict has:  name, artist, album, album_art, track_number, disc_number.
-        Local files and podcast episodes are silently skipped.
-        """
-        try:
-            if "playlist" in url:
-                return self._fetch_playlist(url)
-            elif "album" in url:
-                return self._fetch_album(url)
-            else:
-                return self._fetch_track(url)
-        except Exception as e:
-            raise Exception(f"Failed to fetch Spotify data: {e}")
-
-    def _is_playable_track(self, item) -> bool:
-        """
-        Return True only for real, streamable track objects.
-        Filters out: None items, local files, podcast episodes, malformed tracks.
-
-        IMPORTANT: for playlist items the Spotify API puts 'is_local' on the
-        *wrapper* dict (item), NOT on item['track'].  Always check both levels.
-        """
-        if not item:
-            return False
-        # is_local lives on the playlist item wrapper — check it before unwrapping
-        if item.get('is_local'):
-            return False
-        track = item.get('track') if isinstance(item, dict) and 'track' in item else item
-        if not track:
-            return False
-        # Also guard against track level is_local (some API versions set both)
-        if track.get('is_local'):
-            return False
-        if track.get('type') == 'episode':  # podcast episode in playlist
-            return False
-        if not track.get('name'):           # completely empty / unavailable track
-            return False
-        if not track.get('artists'):        # malformed object
-            return False
-        return True
-
-    def _track_dict(self, track, album_name: str, album_art_url,
-                    track_number: int = 0, disc_number: int = 1) -> dict:
-        return {
-            'name':         track['name'],
-            'artist':       track['artists'][0]['name'],
-            'album':        album_name,
-            'album_art':    album_art_url,
-            'track_number': track_number,
-            'disc_number':  disc_number,
-        }
-
-    def _fetch_playlist(self, url: str):
-        playlist = self.sp.playlist(url)
-        name = playlist['name']
-        tracks = []
-
-        self.update_status(f"Fetching playlist: {name}…")
-
-        # sp.playlist_items() is the modern endpoint (/playlists/{id}/items).
-        # The older sp.playlist_tracks() (/playlists/{id}/tracks) is deprecated
-        # and behaves inconsistently with playlists that mix tracks and episodes.
-        page = self.sp.playlist_items(url)
-        position = 1
-
-        while page:
-            for item in page['items']:
-                if not self._is_playable_track(item):
-                    continue
-                track = item['track']
-                try:
-                    art = None
-                    if track.get('album') and track['album'].get('images'):
-                        art = track['album']['images'][0]['url']
-                    tracks.append(self._track_dict(
-                        track,
-                        album_name=track['album']['name'] if track.get('album') else '',
-                        album_art_url=art,
-                        track_number=position,
-                    ))
-                    position += 1
-                except (KeyError, IndexError, TypeError) as e:
-                    # One malformed item should never abort the whole playlist
-                    print(f"  ⚠ Skipping malformed item in playlist: {e}")
-                    continue
-
-            # Paginate — Spotify returns max 100 items per page
-            page = self.sp.next(page) if page.get('next') else None
-            if page:
-                time.sleep(0.1)     # gentle rate limit respect
-
-        self.update_status(f"Fetched {len(tracks)} tracks from \"{name}\"")
-        return name, tracks
-
-    def _fetch_album(self, url: str):
-        """
-        Fetch every track from an album with proper pagination.
-
-        The top-level album object gives us the cover art; subsequent pages
-        (sp.album_tracks) give us the actual track list.  Without pagination,
-        albums with more than 50 tracks are silently truncated.
-        """
-        album = self.sp.album(url)
-        name  = album['name']
-        art   = album['images'][0]['url'] if album.get('images') else None
-        tracks = []
-
-        self.update_status(f"Fetching album: {name}…")
-
-        # album['tracks'] is already a paging object — paginate it
-        page = album['tracks']
-        while page:
-            for track in page['items']:
-                if not track or not track.get('artists'):
-                    continue                         # skip None / malformed entries
-                tracks.append(self._track_dict(
-                    track,
-                    album_name=name,
-                    album_art_url=art,
-                    track_number=track.get('track_number', 0),
-                    disc_number=track.get('disc_number', 1),
-                ))
-
-            # Paginate — rare but necessary for large / multi disc releases
-            page = self.sp.next(page) if page.get('next') else None
-            if page:
-                time.sleep(0.1)
-
-        self.update_status(f"Fetched {len(tracks)} tracks from \"{name}\"")
-        return name, tracks
-
-    def _fetch_track(self, url: str):
-        track = self.sp.track(url)
-        art   = None
-        if track.get('album') and track['album'].get('images'):
-            art = track['album']['images'][0]['url']
-        return track['name'], [self._track_dict(
-            track,
-            album_name=track['album']['name'] if track.get('album') else '',
-            album_art_url=art,
-            track_number=track.get('track_number', 0),
-            disc_number=track.get('disc_number', 1),
-        )]
-
-    # YouTube search query builder
+        return get_playlist_tracks(self.sp, url)
 
     def build_search_query(self, track: dict) -> str:
-        """
-        Return the best YouTube search string for a track.
-
-        Uses Deezer's public search API as a metadata oracle to get a
-        canonical title.  Falls back to raw Spotify metadata on any failure.
-
-        NOTE: Deezer audio streams are Blowfish-encrypted and session-gated;
-        there is no usable public download endpoint, so YouTube + yt-dlp
-        is the only viable path.
-        """
-        track_norm  = self.normalize_string(track['name'])
-        artist_norm = self.normalize_string(track['artist'])
-
-        for query in [f"{track['artist']} {track['name']}",
-                      f"{track['name']} {track['artist']}"]:
-            try:
-                url  = "https://api.deezer.com/search?q=" + urllib.parse.quote_plus(query)
-                resp = requests.get(
-                    url,
-                    headers={'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json'},
-                    timeout=8
-                )
-                resp.raise_for_status()
-
-                for result in resp.json().get('data', []):
-                    if result.get('type') != 'track':
-                        continue
-                    if (
-                        (track_norm  in self.normalize_string(result['title'])
-                         or self.normalize_string(result['title'])  in track_norm)
-                        and
-                        (artist_norm in self.normalize_string(result['artist']['name'])
-                         or self.normalize_string(result['artist']['name']) in artist_norm)
-                    ):
-                        return f"{result['artist']['name']} {result['title']} audio"
-
-            except Exception as e:
-                print(f"Deezer lookup skipped: {e}")
-
-        return f"{track['artist']} {track['name']} audio"
-
-    # Collection download loop
+        return build_search_query(track)
 
     def download_collection(self, url: str):
             try:
@@ -478,7 +283,7 @@ class ConversionTool:
                         else:
                             success += 1
                     except Exception as err: # Changed from 'e' to avoid confusion
-                        print(f"  ✗ {track['name']}: {err}")
+                        logger.warning('Track failed (%s): %s', track.get('name'), err)
                         failed += 1
                         failed_list.append(f"{track['artist']} — {track['name']}")
 
@@ -544,49 +349,6 @@ class ConversionTool:
         )
 
     # Metadata embedding
-
-    def embed_metadata(self, flac_file: str, track: dict):
-        try:
-            audio = FLAC(flac_file)
-            audio.clear()
-            audio['title']       = track['name']
-            audio['artist']      = track['artist']
-            audio['album']       = track.get('album', '')
-            audio['albumartist'] = track['artist']
-
-            # Track/disc numbers — essential for albums to sort correctly in any player
-            if track.get('track_number'):
-                audio['tracknumber'] = str(track['track_number'])
-            if track.get('disc_number') and track['disc_number'] > 1:
-                audio['discnumber'] = str(track['disc_number'])
-
-            if track.get('album_art'):
-                try:
-                    req = urllib.request.Request(
-                        track['album_art'],
-                        headers={'User-Agent': 'Mozilla/5.0'}
-                    )
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        art_data = resp.read()
-
-                    pic        = Picture()
-                    pic.data   = art_data
-                    pic.type   = 3          # Front cover
-                    pic.mime   = 'image/jpeg'
-                    pic.width  = 640
-                    pic.height = 640
-                    pic.depth  = 24
-
-                    audio.clear_pictures()
-                    audio.add_picture(pic)
-                except Exception as e:
-                    print(f"  ⚠ Artwork skipped: {e}")
-
-            audio.save()
-        except Exception as e:
-            print(f"  ⚠ Metadata error: {e}")
-
-    # Thread safe UI helpers
 
     def safe_after(self, func):
         self.root.after(0, func)
@@ -936,10 +698,6 @@ def embed_metadata(audio_path: str, track: dict):
             return
     except Exception:
         pass
-
-
-def get_available_formats():
-    return ['flac', 'mp3', 'aac', 'wav']
 
 
 def _extension_for(format_selected: str) -> str:

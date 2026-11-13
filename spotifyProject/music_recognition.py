@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import hashlib
 import io
 import json
@@ -23,6 +24,8 @@ from urllib3.util.retry import Retry
 from .config import USER_DATA_DIR
 from .spotify_auth import add_song_to_playlist
 from .auth import get_user_playlist, set_user_playlist
+
+logger = logging.getLogger(__name__)
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("green")
@@ -108,51 +111,6 @@ async def _recognize_with_shazam(audio_path: str) -> dict | None:
         'uri': _extract_spotify_uri(track),
         'cover_url': _extract_cover_url(track),
     }
-
-
-def record_audio(duration: int = 6, samplerate: int = 44100, source: str = 'system') -> str:
-    """Record audio and return the path to a temporary mono WAV file.
-
-    source='system' uses the loopback device (whatever the PC is playing);
-    source='mic' uses the default microphone.
-    """
-    if source == 'system':
-        device = _find_system_audio_device()
-        if device is None:
-            raise RuntimeError(
-                "No system audio loopback device found. Enable 'Stereo Mix' / "
-                "'What U Hear' in Windows sound settings, or use source='mic'."
-            )
-    else:
-        device = None  # default input device
-
-    recording = sd.rec(int(duration * samplerate), samplerate=samplerate,
-                       channels=1, dtype='int16', device=device)
-    sd.wait()
-
-    tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
-    tmp.close()
-    _write_wav(tmp.name, samplerate, recording)
-    return tmp.name
-
-
-def recognize_audio(duration: int = 6, samplerate: int = 44100,
-                    source: str = 'system') -> dict | None:
-    """Record audio, fingerprint it with Shazam, and return the match (or None)."""
-    path = record_audio(duration, samplerate, source)
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(_recognize_with_shazam(path))
-        finally:
-            loop.close()
-            asyncio.set_event_loop(None)
-    finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
 
 
 class MusicRecognitionTool:
@@ -259,7 +217,7 @@ class MusicRecognitionTool:
         try:
             self.RECENT_SONGS_FILE.write_text(json.dumps(self.recent_songs, indent=2, ensure_ascii=False), encoding='utf-8')
         except Exception as exc:
-            print(f'Failed to save recent songs: {exc}')
+            logger.warning('Failed to save recent songs: %s', exc)
 
     def _start_image_loader(self):
         def loader_worker():
@@ -288,7 +246,7 @@ class MusicRecognitionTool:
                             img.save(cache_path, 'JPEG', quality=95)
                             self.image_cache[cache_key] = img
                         except Exception as exc:
-                            print(f'Cover download failed for {cover_url}: {exc}')
+                            logger.debug('Cover download failed for %s: %s', cover_url, exc)
                     if img and cover_frame.winfo_exists():
                         def update_ui(cf, pil_img):
                             if not cf.winfo_exists():
@@ -359,27 +317,6 @@ class MusicRecognitionTool:
         self.set_status(f'✅ Identified: {title} by {artist}')
         self.add_recent_song(title, artist, uri or '', cover_url)
         self.root.after(0, lambda: self._ask_to_save(title, artist, uri or ''))
-
-    def _do_search(self, title: str, artist: str):
-        try:
-            results = self.sp.search(q=f'track:"{title}" artist:"{artist}"', type='track', limit=5, market='US')
-            tracks = results.get('tracks', {}).get('items', [])
-            if not tracks:
-                results = self.sp.search(q=f'{title} {artist}', type='track', limit=5, market='US')
-                tracks = results.get('tracks', {}).get('items', [])
-            if not tracks:
-                self.set_status('❌ No matching track found on Spotify.')
-                return
-            best = tracks[0]
-            name = best['name']
-            artist_name = best['artists'][0]['name']
-            uri = best['uri']
-            cover_url = best.get('album', {}).get('images', [])[-1].get('url') if best.get('album', {}).get('images') else None
-            self.set_status(f'✅ Found: {name} by {artist_name}')
-            self.add_recent_song(name, artist_name, uri, cover_url)
-            self._ask_to_save(name, artist_name, uri)
-        except Exception as exc:
-            self.set_status(f'❌ Spotify search error: {exc}')
 
     def listen_mic(self):
         threading.Thread(target=self._mic_worker, daemon=True).start()

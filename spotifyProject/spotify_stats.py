@@ -1,4 +1,5 @@
 import io
+import logging
 import threading
 import time
 
@@ -6,6 +7,8 @@ import customtkinter as ctk
 import requests
 import spotipy
 from PIL import Image
+
+logger = logging.getLogger(__name__)
 
 ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("green")
@@ -31,8 +34,8 @@ class SpotifyStatsPage:
         self.now_playing_image = None
         self.recent_images: list[ctk.CTkImage] = []
 
-        # Thread safe image cache — fetched in worker threads, read anywhere
-        self._image_cache: dict[str, ctk.CTkImage] = {}
+        # Thread safe cache of downloaded PIL images (never Tk objects)
+        self._image_cache: dict[str, Image.Image] = {}
         self._cache_lock = threading.Lock()
 
         # Playback progress tracking
@@ -162,10 +165,11 @@ class SpotifyStatsPage:
 
     # Image helpers
 
-    def _fetch_image(self, img_url: str, size: tuple) -> ctk.CTkImage | None:
-        """
-        Download and cache an image.  Safe to call from any thread.
-        Returns a CTkImage ready to drop into a label.
+    def _fetch_pil_image(self, img_url: str, size: tuple) -> Image.Image | None:
+        """Download and cache a resized PIL image. Safe to call from any thread.
+
+        Tk objects must never be created off the main thread, so this returns a
+        plain PIL image; callers convert it with _make_ctk_image() on the UI thread.
         """
         cache_key = f"{img_url}@{size[0]}x{size[1]}"
         with self._cache_lock:
@@ -173,13 +177,24 @@ class SpotifyStatsPage:
                 return self._image_cache[cache_key]
         try:
             response = requests.get(img_url, timeout=4)
-            pil_img  = Image.open(io.BytesIO(response.content)).resize(
+            response.raise_for_status()
+            pil_img = Image.open(io.BytesIO(response.content)).convert('RGB').resize(
                 size, Image.Resampling.LANCZOS)
-            ctk_img  = ctk.CTkImage(pil_img, size=size)
             with self._cache_lock:
-                self._image_cache[cache_key] = ctk_img
-            return ctk_img
-        except Exception:
+                self._image_cache[cache_key] = pil_img
+            return pil_img
+        except Exception as exc:
+            logger.debug('Cover download failed for %s: %s', img_url, exc)
+            return None
+
+    def _make_ctk_image(self, pil_img: Image.Image | None, size: tuple) -> ctk.CTkImage | None:
+        """Wrap a PIL image in a CTkImage. Main thread only."""
+        if pil_img is None:
+            return None
+        try:
+            return ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=size)
+        except Exception as exc:
+            logger.debug('Could not build CTkImage: %s', exc)
             return None
 
     # Now Playing
@@ -229,20 +244,22 @@ class SpotifyStatsPage:
                                 f"{self.ms_to_time(self.current_track_duration)}")
                 text = f"{track.get('name')}\n👤 {artists}\n{status_icon} {progress_str}"
 
-                # Fetch cover art in this worker thread (not on the main thread)
+                # Download the cover in this worker thread; the CTkImage itself
+                # is built on the main thread inside update().
                 album   = track.get('album', {})
-                ctk_img = None
+                pil_img = None
                 if album.get('images'):
                     # Some albums only expose a single image — never index [1] blindly
                     images = album['images']
                     pick = images[1] if len(images) > 1 else images[0]
-                    ctk_img = self._fetch_image(pick['url'], (80, 80))
+                    pil_img = self._fetch_pil_image(pick['url'], (80, 80))
 
-                def update(img=ctk_img, t=text):
+                def update(img=pil_img, t=text):
                     self.now_playing_label.configure(text=t)
-                    if img:
-                        self.now_playing_image = img
-                        self.now_playing_cover.configure(image=img)
+                    ctk_img = self._make_ctk_image(img, (80, 80))
+                    if ctk_img:
+                        self.now_playing_image = ctk_img
+                        self.now_playing_cover.configure(image=ctk_img)
 
                 self._safe_after(0, update)
             else:
@@ -298,7 +315,7 @@ class SpotifyStatsPage:
             for i, artist in enumerate(top_artists.get('items', []), 1):
                 img = None
                 if artist.get('images'):
-                    img = self._fetch_image(artist['images'][-1]['url'], (40, 40))
+                    img = self._fetch_pil_image(artist['images'][-1]['url'], (40, 40))
                 artist_data.append({'rank': i, 'name': artist['name'], 'img': img})
 
             track_data = []
@@ -306,7 +323,7 @@ class SpotifyStatsPage:
                 img   = None
                 album = track.get('album', {})
                 if album.get('images'):
-                    img = self._fetch_image(album['images'][-1]['url'], (40, 40))
+                    img = self._fetch_pil_image(album['images'][-1]['url'], (40, 40))
                 track_data.append({'rank': i, 'name': track['name'], 'img': img})
 
             # UI update — no network calls inside
@@ -321,9 +338,10 @@ class SpotifyStatsPage:
                 for item in ad:
                     row = ctk.CTkFrame(self.top_artists_frame, fg_color=CARD_COLOR)
                     row.pack(fill='x', pady=2, padx=5)
-                    if item['img']:
-                        self.artist_images.append(item['img'])
-                        ctk.CTkLabel(row, image=item['img'], text='').pack(
+                    ctk_img = self._make_ctk_image(item['img'], (40, 40))
+                    if ctk_img:
+                        self.artist_images.append(ctk_img)
+                        ctk.CTkLabel(row, image=ctk_img, text='').pack(
                             side='left', padx=5)
                     ctk.CTkLabel(row, text=f"{item['rank']}. {item['name']}",
                                  text_color='white',
@@ -339,9 +357,10 @@ class SpotifyStatsPage:
                 for item in td:
                     row = ctk.CTkFrame(self.top_tracks_frame, fg_color=CARD_COLOR)
                     row.pack(fill='x', pady=2, padx=5)
-                    if item['img']:
-                        self.track_images.append(item['img'])
-                        ctk.CTkLabel(row, image=item['img'], text='').pack(
+                    ctk_img = self._make_ctk_image(item['img'], (40, 40))
+                    if ctk_img:
+                        self.track_images.append(ctk_img)
+                        ctk.CTkLabel(row, image=ctk_img, text='').pack(
                             side='left', padx=5)
                     ctk.CTkLabel(row, text=f"{item['rank']}. {item['name']}",
                                  text_color='white',
@@ -351,7 +370,7 @@ class SpotifyStatsPage:
             self._safe_after(0, update_ui)
 
         except Exception as e:
-            print(f"Stats Error: {e}")
+            logger.warning("Stats error: %s", e)
 
     # Recently Played
 
@@ -370,7 +389,7 @@ class SpotifyStatsPage:
                 img    = None
                 album  = track.get('album', {})
                 if album.get('images'):
-                    img = self._fetch_image(album['images'][-1]['url'], (50, 50))
+                    img = self._fetch_pil_image(album['images'][-1]['url'], (50, 50))
                 artists = ', '.join(a['name'] for a in track['artists'])
                 items_data.append({
                     'name':    track['name'],
@@ -385,9 +404,10 @@ class SpotifyStatsPage:
                 for item in data:
                     row = ctk.CTkFrame(self.recent_scrollable, fg_color=CARD_COLOR)
                     row.pack(fill='x', pady=3, padx=5)
-                    if item['img']:
-                        self.recent_images.append(item['img'])
-                        ctk.CTkLabel(row, image=item['img'], text='').pack(
+                    ctk_img = self._make_ctk_image(item['img'], (50, 50))
+                    if ctk_img:
+                        self.recent_images.append(ctk_img)
+                        ctk.CTkLabel(row, image=ctk_img, text='').pack(
                             side='left', padx=10)
                     info_text = f"{item['name']}\n👤 {item['artists']}"
                     ctk.CTkLabel(row, text=info_text, text_color='white',

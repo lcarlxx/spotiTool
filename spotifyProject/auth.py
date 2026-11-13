@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import secrets
+from datetime import datetime, timezone
 
 from .config import USER_DATA_DIR
 
@@ -101,16 +102,25 @@ def set_remember_me(username: str, enabled: bool) -> None:
         return
     users[username]['remember_me'] = enabled
     if enabled:
-        users[username]['last_logged_in'] = username
+        users[username]['last_logged_in'] = datetime.now(timezone.utc).isoformat()
     save_users(users)
 
 
 def get_remembered_user() -> str | None:
+    """Return the most recently used account that opted into Remember Me.
+
+    Several accounts can be remembered at once; the newest login wins instead of
+    whichever happens to come first in the file.
+    """
     users = load_users()
-    for username, data in users.items():
-        if data.get('remember_me') and data.get('password_hash'):
-            return username
-    return None
+    candidates = [
+        (str(data.get('last_logged_in') or ''), username)
+        for username, data in users.items()
+        if data.get('remember_me') and data.get('password_hash')
+    ]
+    if not candidates:
+        return None
+    return max(candidates)[1]
 
 
 def clear_remember_me(username: str) -> None:

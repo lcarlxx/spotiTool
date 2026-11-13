@@ -265,6 +265,7 @@ Run it with **either** of these (both are equivalent):
 ```powershell
 python -m spotifyProject <command>      # from source
 python run_cli.py <command>             # from source, alternative
+spotitool <command>                     # after `pip install -e .`
 .\dist\spotitool-cli.exe <command>      # packaged build (section 6)
 ```
 
@@ -466,6 +467,26 @@ Delete `build\` and `dist\` first if you want a completely clean rebuild.
 | Want a clean start (accounts, tokens) | Delete the `user_data\` folder (source: `spotifyProject\user_data\`; exe: next to the exe). |
 
 Still stuck? Run `spotitool validate` first — it pinpoints most setup problems.
+If something fails at runtime, check `spotifyProject\user_data\spotitool.log`
+(next to the `.exe` for packaged builds): it records the details behind every
+warning and error.
+
+---
+
+## 7b. Running the tests
+
+The project ships with a pytest suite covering the pure logic (filename
+sanitising, Spotify URI parsing, download formatting/bitrates, password hashing,
+account handling and CLI parsing):
+
+```powershell
+pip install -r requirements-dev.txt pytest
+python -m pytest
+```
+
+Expected output ends with a `N passed` summary. CI runs the same suite on Windows for
+Python 3.12 and 3.13, plus `pyflakes` and a PyInstaller build check on every push
+(`.github/workflows/ci.yml`).
 
 ---
 
@@ -475,15 +496,20 @@ Still stuck? Run `spotitool validate` first — it pinpoints most setup problems
 spotiTool/
 ├── run.py                    # desktop app launcher (python run.py)
 ├── run_cli.py                # CLI launcher (python run_cli.py …)
+├── bootstrap.py              # shared sys.path setup for both launchers
 ├── spotiTool.spec            # PyInstaller build definition (GUI + CLI exes)
 ├── build.ps1 / build.bat     # one-command builds
+├── pyproject.toml            # metadata, dependencies, pytest configuration
 ├── requirements.txt          # runtime dependencies
 ├── requirements-dev.txt      # + PyInstaller
+├── tests/                    # pytest suite (helpers, auth, CLI)
+├── .github/workflows/ci.yml  # lint, tests, and build checks
 └── spotifyProject/
     ├── __init__.py           # version
     ├── __main__.py           # `python -m spotifyProject`
     ├── cli.py                # all CLI commands
     ├── config.py             # paths, credentials loading, validation
+    ├── logging_setup.py      # file + console logging configuration
     ├── auth.py               # local accounts (PBKDF2 hashing)
     ├── spotify_auth.py       # Spotify OAuth / API clients
     ├── main.py               # login screen + app entry
@@ -495,7 +521,8 @@ spotiTool/
 ```
 
 Runtime data (not in git): `spotifyProject/user_data/` contains `user_data.json`
-(accounts), `.spotify_cache` (OAuth token), `recent_songs.json` and `cover_cache/`.
+(accounts), `.spotify_cache` (OAuth token), `recent_songs.json`, `cover_cache/` and
+`spotitool.log` (diagnostics).
 
 ---
 
@@ -584,3 +611,7 @@ distribute a modified build, review how that interacts with your licensing plans
 - **v1.0:** full CLI, single-file PyInstaller desktop build, standard-library WAV
   writing (removes the scipy dependency), background-threaded UI with crash guards,
   honest download error reporting and multi-client retry.
+- **v1.0 review pass:** Tk images are now only built on the main thread, logging
+  replaced console-only `print` calls, the downloader's duplicated class methods
+  were collapsed onto one implementation, dead code and a stale requirements file
+  were removed, and tests plus CI were added.
